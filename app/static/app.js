@@ -78,7 +78,7 @@ function toggleModeDependentFields() {
 function setAdvancedOpen(isOpen) {
   advancedPanelEl.classList.toggle("is-collapsed", !isOpen);
   advancedToggleEl.setAttribute("aria-expanded", String(isOpen));
-  advancedToggleEl.textContent = isOpen ? "Hide expert options" : "Expert options";
+  advancedToggleEl.textContent = isOpen ? "Expertenoptionen ausblenden" : "Expertenoptionen";
 }
 
 function setLoading(isLoading) {
@@ -137,7 +137,7 @@ function firstDroppedFile(event) {
   return event.dataTransfer.files[0];
 }
 
-function clearPreview(message = "No file selected.") {
+function clearPreview(message = "Keine Datei ausgewählt.") {
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
     previewUrl = null;
@@ -187,7 +187,7 @@ function updatePreview() {
     return;
   }
 
-  clearPreview(`Preview not available for "${file.type || "unknown"}".`);
+  clearPreview(`Für "${file.type || "unbekannt"}" ist keine Vorschau verfügbar.`);
 }
 
 function currentFile() {
@@ -224,7 +224,7 @@ function buildPayload() {
   if (tokenLimitRaw) {
     const tokenLimit = Number(tokenLimitRaw);
     if (!Number.isInteger(tokenLimit) || tokenLimit < 1) {
-      throw new Error("Token limit must be a positive integer.");
+      throw new Error("Token-Limit muss eine positive ganze Zahl sein.");
     }
     payload.set("token_limit", String(tokenLimit));
   } else {
@@ -295,7 +295,7 @@ async function runOCR() {
       activeRequestController = null;
     }
     setLoading(false);
-    metaEl.textContent = "Select a file to start OCR.";
+    metaEl.textContent = "Datei auswählen, um OCR zu starten.";
     clearOutput();
     setWorkspaceVisible(false);
     return;
@@ -307,7 +307,7 @@ async function runOCR() {
       activeRequestController = null;
     }
     setLoading(false);
-    metaEl.textContent = "PDF preview is supported, but OCR currently supports PNG/JPEG/WEBP.";
+    metaEl.textContent = "PDF-Vorschau wird unterstützt, OCR derzeit jedoch nur für PNG/JPEG/WEBP.";
     clearOutput();
     setWorkspaceVisible(true);
     return;
@@ -321,7 +321,7 @@ async function runOCR() {
   setLoading(true);
   clearOutput();
   setWorkspaceVisible(true);
-  metaEl.textContent = "Running OCR...";
+  metaEl.textContent = "OCR wird ausgeführt...";
 
   try {
     const response = await fetch("/api/ocr", {
@@ -331,11 +331,11 @@ async function runOCR() {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "OCR failed");
+      throw new Error(data.detail || "OCR fehlgeschlagen");
     }
 
     lastResponse = data;
-    outputEl.textContent = data.text || "(empty output)";
+    outputEl.textContent = data.text || "(kein Inhalt)";
     const showStructured = data.mode === "structured" && !!data.structured;
     structuredWrapEl.classList.toggle("hidden", !showStructured);
     downloadBtn.classList.toggle("hidden", !showStructured);
@@ -346,12 +346,12 @@ async function runOCR() {
     }
 
     const warnings = (data.warnings || []).join(" | ");
-    metaEl.textContent = `Model: ${data.model} | Latency: ${data.latency_ms} ms${warnings ? ` | Warnings: ${warnings}` : ""}`;
+    metaEl.textContent = `Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
   } catch (error) {
     if (error.name === "AbortError") {
       return;
     }
-    metaEl.textContent = `Error: ${error.message}`;
+    metaEl.textContent = `Fehler: ${error.message}`;
   } finally {
     if (activeRequestController === controller) {
       activeRequestController = null;
@@ -525,7 +525,7 @@ downloadBtn.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "ocr-result.json";
+  link.download = "ocr-ergebnis.json";
   link.click();
   URL.revokeObjectURL(url);
 });

@@ -41,7 +41,7 @@ def get_settings() -> Settings:
         default_token_limit = 4096
 
     return Settings(
-        app_name=os.getenv("APP_NAME", "OCR Demo"),
+        app_name=os.getenv("APP_NAME", "OCR-Demo"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "glm-ocr:latest"),
         default_token_limit=default_token_limit,

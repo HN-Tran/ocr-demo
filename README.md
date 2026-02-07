@@ -1,21 +1,21 @@
-# OCR Demo (Ollama + FastAPI)
+# OCR-Demo (Ollama + FastAPI)
 
-Minimal OCR demo that uses an Ollama vision model from a FastAPI backend, with a lightweight web UI and benchmark harness.
+Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive schlanker Weboberfläche und Evaluations-Runner.
 
-## Features
+## Funktionen
 
-- `POST /api/ocr` for plain or structured extraction
-- `GET /api/models` to list available Ollama models
-- `GET /api/schemas` to inspect supported structured schemas
-- Browser UI at `/` with centered onboarding card, drag/drop upload, auto-run on file select, advanced options toggle, quick invoice/receipt presets, dark mode, image/PDF preview, and JSON highlighting
-- Evaluation runner with CER/WER and field accuracy metrics
+- `POST /api/ocr` für Klartext- oder strukturierte Extraktion
+- `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
+- `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
+- Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen Rechnungs-/Beleg-Vorgaben, Hell/Dunkel-Modus, Bild/PDF-Vorschau und JSON-Highlighting
+- Evaluations-Runner mit CER/WER und Feldgenauigkeit
 
-## Requirements
+## Anforderungen
 
 - Python 3.10+
 - `uv` 0.10+
-- Running Ollama instance (default: `http://localhost:11434`)
-- A vision-capable model pulled into Ollama
+- Laufende Ollama-Instanz (Standard: `http://localhost:11434`)
+- Ein vision-fähiges Modell in Ollama
 
 ## Setup
 
@@ -23,7 +23,7 @@ Minimal OCR demo that uses an Ollama vision model from a FastAPI backend, with a
 uv sync --all-groups
 ```
 
-Optional environment variables:
+Optionale Umgebungsvariablen:
 
 ```bash
 export OLLAMA_BASE_URL="http://localhost:11434"
@@ -33,32 +33,29 @@ export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"
 ```
 
-## Run
+## Starten
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-Open: `http://127.0.0.1:8000`
+Öffnen: `http://127.0.0.1:8000`
 
 ## API
 
-`POST /api/ocr` multipart form fields:
+`POST /api/ocr` (multipart/form-data) Felder:
 
-- `file`: image (`image/png`, `image/jpeg`, `image/webp`)
-- `mode`: `plain` or `structured`
-- `schema_name`: required when mode is `structured`
-- `model`: optional model override
-- `token_limit`: optional token/context limit override passed as Ollama `num_ctx`
-- `task`: plain-mode task preset (`ocr_text`, `describe_image`, `read_scene_text`)
-- `custom_prompt`: optional plain-mode override prompt (takes precedence over `task`)
+- `file`: Bild (`image/png`, `image/jpeg`, `image/webp`)
+- `mode`: `plain` oder `structured`
+- `schema_name`: erforderlich bei `mode=structured`
+- `model`: optionale Modell-Überschreibung
+- `token_limit`: optionale Token-/Kontextgrenze, wird als Ollama-`num_ctx` gesetzt
+- `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`)
+- `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
 
-Note: the UI can preview PDFs client-side, but OCR API input is currently image-only.
+Hinweis: Die UI kann PDFs clientseitig vorschauen, die OCR-API akzeptiert derzeit nur Bilder.
 
-For vision models, a common plain-mode setup is `task=describe_image` or a custom prompt such as
-`Describe this image in concise detail.`.
-
-Response shape:
+Response-Format:
 
 ```json
 {
@@ -74,15 +71,15 @@ Response shape:
 
 ## Evaluation
 
-Add sample images to `data/samples/` and update `data/ground_truth/manifest.jsonl`.
+Beispielbilder nach `data/samples/` legen und `data/ground_truth/manifest.jsonl` aktualisieren.
 
 ```bash
 uv run python -m eval.run --manifest data/ground_truth/manifest.jsonl --samples-dir data/samples --reports-dir eval/reports
 ```
 
-Report output is written to `eval/reports/eval_report_<timestamp>.json`.
+Der Report wird unter `eval/reports/eval_report_<timestamp>.json` geschrieben.
 
-## Quality Checks
+## Qualitätsprüfungen
 
 ```bash
 uv run ruff check .
@@ -91,77 +88,77 @@ uv run mypy app eval tests
 uv run pytest
 ```
 
-## Dependency Management (uv)
+## Abhängigkeiten verwalten (uv)
 
-Install/update dependencies and lock:
+Installieren/Aktualisieren und Lock-Datei erzeugen:
 
 ```bash
 uv sync --all-groups
 uv lock
 ```
 
-Add a runtime dependency:
+Runtime-Abhängigkeit hinzufügen:
 
 ```bash
 uv add <package>
 ```
 
-Add a dev dependency:
+Dev-Abhängigkeit hinzufügen:
 
 ```bash
 uv add --dev <package>
 ```
 
-## Docker (Isolated Run and Test)
+## Docker (isoliertes Ausführen und Testen)
 
-Build and run app + Ollama:
+App + Ollama bauen und starten:
 
 ```bash
 docker compose up --build
 ```
 
-Open: `http://127.0.0.1:8000`
+Öffnen: `http://127.0.0.1:8000`
 
-GPU notes:
+GPU-Hinweise:
 
-- Compose is configured to request NVIDIA GPUs for the `ollama` service.
-- Requires NVIDIA driver + NVIDIA Container Toolkit installed on the host.
-- Optional overrides:
-  - `DEFAULT_TOKEN_LIMIT` (default: `4096`)
-  - `OLLAMA_GPU_DEVICES` (default: `all`)
-  - `NVIDIA_VISIBLE_DEVICES` (default: `all`)
-  - `NVIDIA_DRIVER_CAPABILITIES` (default: `compute,utility`)
+- Compose ist für den `ollama`-Service auf NVIDIA-GPUs konfiguriert.
+- Erfordert NVIDIA-Treiber + NVIDIA Container Toolkit auf dem Host.
+- Optionale Overrides:
+  - `DEFAULT_TOKEN_LIMIT` (Standard: `4096`)
+  - `OLLAMA_GPU_DEVICES` (Standard: `all`)
+  - `NVIDIA_VISIBLE_DEVICES` (Standard: `all`)
+  - `NVIDIA_DRIVER_CAPABILITIES` (Standard: `compute,utility`)
 
-Pull your OCR model inside Ollama (first-time setup):
+OCR-Modell in Ollama laden (einmalig):
 
 ```bash
 docker compose exec ollama ollama pull glm-ocr:latest
 ```
 
-Verify model is running on GPU after a request:
+Prüfen, ob nach einer Anfrage GPU genutzt wird:
 
 ```bash
 docker compose exec ollama ollama ps
 ```
 
-Look for `PROCESSOR` showing `GPU` instead of `CPU`.
+Bei `PROCESSOR` sollte `GPU` statt `CPU` stehen.
 
-Run isolated quality checks + tests:
+Isolierte Qualitätsprüfungen + Tests ausführen:
 
 ```bash
 docker compose --profile test run --rm test
 ```
 
-Stop containers:
+Container stoppen:
 
 ```bash
 docker compose down
 ```
 
-## License
+## Lizenz
 
-Proprietary - Internal use only.
+Proprietär - nur für interne Nutzung.
 
-## Author
+## Autor
 
 HN-Tran

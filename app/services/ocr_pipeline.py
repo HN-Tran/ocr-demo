@@ -43,7 +43,7 @@ class OCRPipeline:
         max_image_dim: int,
     ) -> None:
         if default_token_limit < 1:
-            raise ValueError("default_token_limit must be a positive integer")
+            raise ValueError("default_token_limit muss eine positive ganze Zahl sein")
         self.ollama_client = ollama_client
         self.default_model = default_model
         self.default_token_limit = default_token_limit
@@ -68,7 +68,7 @@ class OCRPipeline:
                 new_size = (max(1, int(width * ratio)), max(1, int(height * ratio)))
                 image = image.resize(new_size, Image.Resampling.LANCZOS)
                 warnings.append(
-                    f"Input resized from {width}x{height} to {new_size[0]}x{new_size[1]}"
+                    f"Eingabe wurde von {width}x{height} auf {new_size[0]}x{new_size[1]} skaliert"
                 )
 
             output = BytesIO()
@@ -83,20 +83,20 @@ class OCRPipeline:
         if selected_task == PLAIN_TASK_OCR_TEXT:
             return self.plain_prompt_template
         if selected_task == PLAIN_TASK_DESCRIBE_IMAGE:
-            return "Describe this image in concise, factual detail. Return plain text only."
+            return "Beschreibe dieses Bild knapp und sachlich. Gib nur Klartext zurück."
         if selected_task == PLAIN_TASK_READ_SCENE_TEXT:
             return (
-                "Read and transcribe all visible text from this image. "
-                "If no text is visible, return exactly: No visible text."
+                "Lies und transkribiere den gesamten sichtbaren Text aus diesem Bild. "
+                "Wenn kein Text sichtbar ist, gib exakt aus: Kein sichtbarer Text."
             )
         raise ValueError(
-            f"Unknown task '{selected_task}'. Supported tasks: {', '.join(SUPPORTED_PLAIN_TASKS)}"
+            f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
         )
 
     def _build_structured_prompt(self, schema_name: str) -> str:
         schema = SCHEMA_REGISTRY.get(schema_name)
         if schema is None:
-            raise ValueError(f"Unknown schema_name '{schema_name}'")
+            raise ValueError(f"Unbekannter schema_name '{schema_name}'")
         return self.structured_prompt_template.format(
             schema_name=schema_name,
             schema_description=schema["description"],
@@ -119,7 +119,7 @@ class OCRPipeline:
         selected_model = model or self.default_model
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
         if selected_token_limit < 1:
-            raise ValueError("token_limit must be a positive integer")
+            raise ValueError("token_limit muss eine positive ganze Zahl sein")
         prepared_image, preprocess_warnings = self._preprocess(image_bytes)
         warnings.extend(preprocess_warnings)
 
@@ -127,14 +127,14 @@ class OCRPipeline:
             prompt = self._build_plain_prompt(task=task, custom_prompt=custom_prompt)
         elif mode == "structured":
             if not schema_name:
-                raise ValueError("schema_name is required for structured mode")
+                raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
             if custom_prompt and custom_prompt.strip():
-                raise ValueError("custom_prompt is only supported for plain mode")
+                raise ValueError("custom_prompt wird nur im Klartextmodus unterstützt")
             if task and task.strip() and task.strip() != PLAIN_TASK_OCR_TEXT:
-                raise ValueError("task is only supported for plain mode")
+                raise ValueError("task wird nur im Klartextmodus unterstützt")
             prompt = self._build_structured_prompt(schema_name)
         else:
-            raise ValueError(f"Unsupported mode '{mode}'")
+            raise ValueError(f"Nicht unterstützter Modus '{mode}'")
 
         start = time.perf_counter()
         raw_output = await self.ollama_client.run_ocr(

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="de">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OCR Demo</title>
+    <title>OCR-Demo</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,16 +11,16 @@
       <section class="panel panel-input">
         <div class="heading-row">
           <div>
-            <h1>OCR Demo</h1>
-            <p class="sub">Drop a file and get extracted text in seconds.</p>
+            <h1>OCR-Demo</h1>
+            <p class="sub">Datei ablegen und Text in Sekunden extrahieren.</p>
           </div>
-          <div class="theme-toggle" role="group" aria-label="Theme mode">
+          <div class="theme-toggle" role="group" aria-label="Farbmodus">
             <button
               id="theme-light-btn"
               class="theme-option"
               type="button"
-              aria-label="Light mode"
-              title="Light mode"
+              aria-label="Heller Modus"
+              title="Heller Modus"
               aria-pressed="true"
             >
               <span class="theme-icon" aria-hidden="true">☀</span>
@@ -29,8 +29,8 @@
               id="theme-dark-btn"
               class="theme-option"
               type="button"
-              aria-label="Dark mode"
-              title="Dark mode"
+              aria-label="Dunkler Modus"
+              title="Dunkler Modus"
               aria-pressed="false"
             >
               <span class="theme-icon" aria-hidden="true">☾</span>
@@ -50,62 +50,64 @@
           <section id="onboarding-card" class="onboarding-card">
             <div class="onboarding-hero">
               <button id="dropzone" class="dropzone" type="button">
-                Drop images or PDFs here
+                Bilder oder PDFs hier ablegen
               </button>
             </div>
             <div class="onboarding-actions">
-              <button id="pick-file-btn" class="pick-file-btn" type="button">Choose file</button>
-              <p class="onboarding-hint">Supports PNG, JPEG, WEBP and PDF preview.</p>
+              <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
+              <p class="onboarding-hint">Unterstützt PNG, JPEG, WEBP und PDF-Vorschau.</p>
             </div>
           </section>
 
           <div id="preview-wrap" class="preview-wrap hidden">
             <div class="preview-head">
               <div>
-                <p class="preview-title">Preview</p>
-                <p class="preview-drop-hint">Drop a new file anywhere to replace it.</p>
+                <p class="preview-title">Vorschau</p>
+                <p class="preview-drop-hint">
+                  Zum Ersetzen Datei in das Browserfenster ziehen und loslassen.
+                </p>
               </div>
-              <button id="change-file-btn" class="change-file-btn" type="button">Change file</button>
+              <button id="change-file-btn" class="change-file-btn" type="button">Datei ändern</button>
             </div>
-            <div id="preview-empty" class="preview-empty">No file selected.</div>
-            <img id="preview-image" class="preview-media hidden" alt="Selected file preview" />
+            <div id="preview-empty" class="preview-empty">Keine Datei ausgewählt.</div>
+            <img id="preview-image" class="preview-media hidden" alt="Vorschau der ausgewählten Datei" />
             <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
-            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer">Open PDF in new tab</a>
+            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer">PDF in neuem Tab öffnen</a>
           </div>
 
           <div id="advanced-panel" class="advanced-panel is-collapsed">
             <label>
-              Mode
+              Modus
               <select id="mode" name="mode">
-                <option value="plain">Plain text</option>
-                <option value="invoice_basic">Invoice JSON</option>
-                <option value="receipt_basic">Receipt JSON</option>
-                <option value="structured">Structured JSON (custom schema)</option>
+                <option value="plain">Klartext</option>
+                <option value="invoice_basic">Rechnung JSON</option>
+                <option value="receipt_basic">Beleg JSON</option>
+                <option value="structured">Strukturiertes JSON (benutzerdefiniertes Schema)</option>
               </select>
             </label>
 
             <label id="task-wrap">
-              Task
+              Aufgabe
               <select id="task" name="task">
-                <option value="ocr_text">OCR text extraction</option>
-                <option value="describe_image">Describe image</option>
-                <option value="read_scene_text">Read scene text</option>
+                <option value="ocr_text">OCR-Textextraktion</option>
+                <option value="describe_image">Bild beschreiben</option>
+                <option value="read_scene_text">Szenentext lesen</option>
               </select>
             </label>
 
             <label id="custom-prompt-wrap">
-              Custom prompt (optional)
+              Eigener Prompt (optional)
               <textarea
                 id="custom_prompt"
                 name="custom_prompt"
                 rows="4"
-                placeholder="Describe this image in one paragraph."
+                placeholder="Beschreibe dieses Bild in einem Absatz."
               ></textarea>
-              <span class="hint">If provided, this overrides the selected task preset.</span>
+              <span class="hint">Wenn gesetzt, überschreibt dies die gewählte Aufgaben-Vorgabe.</span>
             </label>
 
             <label id="schema-wrap" class="hidden">
-              Schema (custom structured mode)
+              Schema (benutzerdefinierter strukturierter Modus)
               <select id="schema_name" name="schema_name">
                 <option value="invoice_basic">invoice_basic</option>
                 <option value="receipt_basic">receipt_basic</option>
@@ -113,12 +115,12 @@
             </label>
 
             <label>
-              Model
+              Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>
 
             <label>
-              Token limit (num_ctx)
+              Token-Limit
               <input
                 id="token_limit"
                 name="token_limit"
@@ -137,7 +139,7 @@
               type="button"
               aria-expanded="false"
             >
-              Expert options
+              Expertenoptionen
             </button>
           </div>
         </form>
@@ -145,26 +147,26 @@
 
       <section id="result-panel" class="panel result-panel hidden">
         <div class="result-header">
-          <h2>Extracted Text</h2>
+          <h2>Extrahierter Text</h2>
           <div class="actions">
-            <button id="copy-btn" type="button">Copy text</button>
-            <button id="download-btn" type="button" class="hidden">Download JSON</button>
+            <button id="copy-btn" type="button">Text kopieren</button>
+            <button id="download-btn" type="button" class="hidden">JSON herunterladen</button>
           </div>
         </div>
-        <div id="meta">Select a file to start OCR.</div>
+        <div id="meta">Datei auswählen, um OCR zu starten.</div>
         <pre id="output"></pre>
         <section id="structured-wrap" class="hidden">
-          <h3>Structured Payload</h3>
+          <h3>Strukturierte Nutzdaten</h3>
           <pre id="json-output"></pre>
         </section>
         <div id="loading-overlay" class="loading-overlay" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
-          <span>Running OCR...</span>
+          <span>OCR wird ausgeführt...</span>
         </div>
       </section>
     </main>
     <div id="global-drop-overlay" class="global-drop-overlay" aria-hidden="true">
-      <div class="global-drop-card">Drop file to run OCR</div>
+      <div class="global-drop-card">Datei ablegen, um OCR zu starten</div>
     </div>
 
     <script src="/static/app.js"></script>

@@ -30,7 +30,7 @@ def parse_structured_output(raw: str, expected_fields: list[str]) -> StructuredP
     if candidate is None:
         return StructuredParseResult(
             data=None,
-            warnings=["Could not find JSON object in model output."],
+            warnings=["Im Modell-Output wurde kein JSON-Objekt gefunden."],
         )
 
     try:
@@ -38,13 +38,13 @@ def parse_structured_output(raw: str, expected_fields: list[str]) -> StructuredP
     except json.JSONDecodeError:
         return StructuredParseResult(
             data=None,
-            warnings=["Model returned malformed JSON."],
+            warnings=["Modell hat fehlerhaftes JSON zurückgegeben."],
         )
 
     if not isinstance(parsed, dict):
         return StructuredParseResult(
             data=None,
-            warnings=["Model returned JSON that is not an object."],
+            warnings=["Modell hat JSON zurückgegeben, das kein Objekt ist."],
         )
 
     normalized: dict[str, Any] = {}
@@ -52,10 +52,10 @@ def parse_structured_output(raw: str, expected_fields: list[str]) -> StructuredP
         value = parsed.get(field)
         normalized[field] = value
         if value is None:
-            warnings.append(f"Missing expected field: {field}")
+            warnings.append(f"Erwartetes Feld fehlt: {field}")
 
     extra_fields = [key for key in parsed.keys() if key not in expected_fields]
     if extra_fields:
-        warnings.append(f"Ignored extra fields: {', '.join(extra_fields)}")
+        warnings.append(f"Zusätzliche Felder ignoriert: {', '.join(extra_fields)}")
 
     return StructuredParseResult(data=normalized, warnings=warnings)

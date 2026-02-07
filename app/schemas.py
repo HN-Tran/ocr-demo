@@ -1,6 +1,6 @@
 SCHEMA_REGISTRY: dict[str, dict] = {
     "invoice_basic": {
-        "description": "Basic invoice fields.",
+        "description": "Grundlegende Rechnungsfelder.",
         "fields": {
             "vendor": "string",
             "invoice_number": "string",
@@ -11,7 +11,7 @@ SCHEMA_REGISTRY: dict[str, dict] = {
         },
     },
     "receipt_basic": {
-        "description": "Basic receipt fields.",
+        "description": "Grundlegende Belegfelder.",
         "fields": {
             "merchant": "string",
             "date": "string",

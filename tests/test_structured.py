@@ -16,7 +16,7 @@ def test_parse_structured_output_missing_fields():
     raw = '{"vendor":"ACME"}'
     result = parse_structured_output(raw, ["vendor", "invoice_number"])
     assert result.data == {"vendor": "ACME", "invoice_number": None}
-    assert any("Missing expected field: invoice_number" in x for x in result.warnings)
+    assert any("Erwartetes Feld fehlt: invoice_number" in x for x in result.warnings)
 
 
 def test_parse_structured_output_malformed():

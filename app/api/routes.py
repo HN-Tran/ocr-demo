@@ -67,19 +67,19 @@ async def ocr(
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file content type: {file.content_type}",
+            detail=f"Nicht unterstützter Datei-Inhaltstyp: {file.content_type}",
         )
 
     image_bytes = await file.read()
     if not image_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
+            detail="Die hochgeladene Datei ist leer.",
         )
     if len(image_bytes) > settings.max_upload_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds {settings.max_upload_bytes} bytes.",
+            detail=f"Datei überschreitet {settings.max_upload_bytes} Bytes.",
         )
 
     try:
@@ -100,10 +100,10 @@ async def ocr(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger = cast(logging.Logger, request.app.state.logger)
-        logger.exception("Unexpected OCR failure")
+        logger.exception("Unerwarteter OCR-Fehler")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected OCR failure: {exc}",
+            detail=f"Unerwarteter OCR-Fehler: {exc}",
         ) from exc
 
     return {

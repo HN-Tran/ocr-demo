@@ -53,7 +53,7 @@ def test_plain_describe_image_task_uses_describe_prompt() -> None:
             custom_prompt=None,
         )
     )
-    assert "Describe this image" in fake_client.last_prompt
+    assert "Beschreibe dieses Bild" in fake_client.last_prompt
 
 
 def test_plain_custom_prompt_overrides_task_prompt() -> None:
@@ -65,10 +65,10 @@ def test_plain_custom_prompt_overrides_task_prompt() -> None:
             mode="plain",
             schema_name=None,
             task="describe_image",
-            custom_prompt="Describe this image in one sentence.",
+            custom_prompt="Beschreibe dieses Bild in einem Satz.",
         )
     )
-    assert fake_client.last_prompt == "Describe this image in one sentence."
+    assert fake_client.last_prompt == "Beschreibe dieses Bild in einem Satz."
 
 
 def test_plain_unknown_task_raises() -> None:
@@ -84,7 +84,7 @@ def test_plain_unknown_task_raises() -> None:
                 custom_prompt=None,
             )
         )
-    assert "Unknown task" in str(exc_info.value)
+    assert "Unbekannte Aufgabe" in str(exc_info.value)
 
 
 def test_structured_rejects_custom_prompt() -> None:
@@ -100,7 +100,7 @@ def test_structured_rejects_custom_prompt() -> None:
                 custom_prompt="Return JSON",
             )
         )
-    assert "custom_prompt is only supported for plain mode" in str(exc_info.value)
+    assert "custom_prompt wird nur im Klartextmodus unterstützt" in str(exc_info.value)
 
 
 def test_default_token_limit_is_forwarded() -> None:
@@ -143,4 +143,4 @@ def test_token_limit_must_be_positive() -> None:
                 token_limit=0,
             )
         )
-    assert "token_limit must be a positive integer" in str(exc_info.value)
+    assert "token_limit muss eine positive ganze Zahl sein" in str(exc_info.value)

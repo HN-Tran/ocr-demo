@@ -6,7 +6,7 @@ import httpx
 
 
 class OllamaError(RuntimeError):
-    """Raised when Ollama request fails."""
+    """Wird ausgelöst, wenn eine Ollama-Anfrage fehlschlägt."""
 
 
 class OllamaClient:
@@ -21,7 +21,7 @@ class OllamaClient:
                 response = await client.get(url)
                 response.raise_for_status()
             except httpx.HTTPError as exc:
-                raise OllamaError(f"Failed to list models: {exc}") from exc
+                raise OllamaError(f"Modellliste konnte nicht geladen werden: {exc}") from exc
         payload = response.json()
         models = payload.get("models", [])
         return [entry.get("name", "") for entry in models if entry.get("name")]
@@ -58,10 +58,10 @@ class OllamaClient:
                 response = await client.post(url, json=request_payload)
                 response.raise_for_status()
             except httpx.HTTPError as exc:
-                raise OllamaError(f"Failed OCR request: {exc}") from exc
+                raise OllamaError(f"OCR-Anfrage fehlgeschlagen: {exc}") from exc
         payload = response.json()
         message = payload.get("message", {})
         content = message.get("content", "")
         if not isinstance(content, str) or not content.strip():
-            raise OllamaError("Ollama returned empty content")
+            raise OllamaError("Ollama hat leeren Inhalt zurückgegeben")
         return content

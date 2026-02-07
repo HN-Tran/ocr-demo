@@ -67,7 +67,7 @@ class FakePipeline:
             "token_limit": token_limit,
         }
         if mode == "structured" and not schema_name:
-            raise ValueError("schema_name is required for structured mode")
+            raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
         return type(
             "OCRResult",
             (),
@@ -108,7 +108,7 @@ def test_ocr_rejects_bad_file_type() -> None:
             )
         )
     assert exc_info.value.status_code == 400
-    assert "Unsupported file content type" in str(exc_info.value.detail)
+    assert "Nicht unterstützter Datei-Inhaltstyp" in str(exc_info.value.detail)
 
 
 def test_ocr_plain() -> None:
@@ -145,7 +145,7 @@ def test_ocr_structured_requires_schema() -> None:
             )
         )
     assert exc_info.value.status_code == 400
-    assert "schema_name is required for structured mode" in str(exc_info.value.detail)
+    assert "schema_name ist für den strukturierten Modus erforderlich" in str(exc_info.value.detail)
 
 
 def test_ocr_structured_with_schema() -> None:
@@ -175,12 +175,12 @@ def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
             schema_name=None,
             model="llava:latest",
             task="describe_image",
-            custom_prompt="Describe this image.",
+            custom_prompt="Beschreibe dieses Bild.",
             token_limit=8192,
             pipeline=cast(OCRPipeline, fake_pipeline),
         )
     )
     assert response["model"] == "llava:latest"
     assert fake_pipeline.last_call["task"] == "describe_image"
-    assert fake_pipeline.last_call["custom_prompt"] == "Describe this image."
+    assert fake_pipeline.last_call["custom_prompt"] == "Beschreibe dieses Bild."
     assert fake_pipeline.last_call["token_limit"] == 8192
