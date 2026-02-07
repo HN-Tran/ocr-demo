@@ -1,0 +1,3 @@
+{"sample":"example_receipt.png","mode":"plain","text":"YOUR EXPECTED TEXT HERE"}
+{"sample":"example_invoice.png","mode":"structured","schema_name":"invoice_basic","structured":{"vendor":"ACME","invoice_number":"INV-001","invoice_date":"2026-01-01","due_date":"2026-01-15","total":"100.00","currency":"USD"}}
+

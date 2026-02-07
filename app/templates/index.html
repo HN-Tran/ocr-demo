@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OCR Demo</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel">
+        <div class="heading-row">
+          <div>
+            <h1>OCR Demo</h1>
+            <p class="sub">Ollama-powered OCR extraction.</p>
+          </div>
+          <button id="theme-btn" class="theme-btn" type="button" aria-label="Toggle theme">Dark mode</button>
+        </div>
+        <form id="ocr-form">
+          <label>
+            Image
+            <input
+              id="file"
+              name="file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              required
+            />
+          </label>
+
+          <label>
+            Mode
+            <select id="mode" name="mode">
+              <option value="plain">Plain text</option>
+              <option value="structured">Structured JSON</option>
+            </select>
+          </label>
+
+          <label id="task-wrap">
+            Task
+            <select id="task" name="task">
+              <option value="ocr_text">OCR text extraction</option>
+              <option value="describe_image">Describe image</option>
+              <option value="read_scene_text">Read scene text</option>
+            </select>
+          </label>
+
+          <label id="custom-prompt-wrap">
+            Custom prompt (optional)
+            <textarea
+              id="custom_prompt"
+              name="custom_prompt"
+              rows="4"
+              placeholder="Describe this image in one paragraph."
+            ></textarea>
+            <span class="hint">If provided, this overrides the selected task preset.</span>
+          </label>
+
+          <label id="schema-wrap" class="hidden">
+            Schema
+            <select id="schema_name" name="schema_name">
+              <option value="invoice_basic">invoice_basic</option>
+              <option value="receipt_basic">receipt_basic</option>
+            </select>
+          </label>
+
+          <label>
+            Model
+            <input id="model" name="model" placeholder="{{ default_model }}" />
+          </label>
+
+          <div class="preview-wrap">
+            <p class="preview-title">Preview</p>
+            <div id="preview-empty" class="preview-empty">No file selected.</div>
+            <img id="preview-image" class="preview-media hidden" alt="Selected file preview" />
+            <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
+            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer">Open PDF in new tab</a>
+          </div>
+
+          <button id="run-btn" type="submit">Run OCR</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="result-header">
+          <h2>Result</h2>
+          <div class="actions">
+            <button id="copy-btn" type="button">Copy text</button>
+            <button id="download-btn" type="button">Download JSON</button>
+          </div>
+        </div>
+        <div id="meta"></div>
+        <pre id="output"></pre>
+        <pre id="json-output"></pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

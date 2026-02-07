@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-glm-ocr:latest}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-8388608}
+      MAX_IMAGE_DIM: ${MAX_IMAGE_DIM:-2048}
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    gpus: ${OLLAMA_GPU_DEVICES:-all}
+    volumes:
+      - ollama_data:/root/.ollama
+
+  test:
+    build:
+      context: .
+      target: test
+    profiles: ["test"]
+    command: >
+      sh -lc "uv run ruff check . &&
+      uv run ruff format --check . &&
+      uv run mypy app eval tests &&
+      uv run pytest -q"
+
+volumes:
+  ollama_data:
