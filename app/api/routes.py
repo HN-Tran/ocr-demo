@@ -12,7 +12,7 @@ from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient, OllamaError
 
 router = APIRouter(prefix="/api")
-ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
+ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "application/pdf"}
 
 
 def get_ocr_pipeline(request: Request) -> OCRPipeline:
@@ -85,6 +85,7 @@ async def ocr(
     try:
         result = await pipeline.run(
             image_bytes=image_bytes,
+            content_type=file.content_type,
             mode=mode,
             schema_name=schema_name,
             model=model,

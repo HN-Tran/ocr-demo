@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -38,18 +39,23 @@ def create_app() -> FastAPI:
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
     app.state.templates = templates
+    static_files = (base_dir / "static" / "styles.css", base_dir / "static" / "app.js")
+    static_version = str(int(max(path.stat().st_mtime for path in static_files)))
+    app.state.static_version = static_version
 
     app.mount("/static", StaticFiles(directory=str(base_dir / "static")), name="static")
     app.include_router(router)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request) -> HTMLResponse:
+        version = cast(str, request.app.state.static_version)
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "default_model": settings.ollama_model,
                 "default_token_limit": settings.default_token_limit,
+                "static_version": version,
             },
         )
 

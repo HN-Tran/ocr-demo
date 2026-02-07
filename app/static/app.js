@@ -301,18 +301,6 @@ async function runOCR() {
     return;
   }
 
-  if (selectedFile.type === "application/pdf") {
-    if (activeRequestController) {
-      activeRequestController.abort();
-      activeRequestController = null;
-    }
-    setLoading(false);
-    metaEl.textContent = "PDF-Vorschau wird unterstützt, OCR derzeit jedoch nur für PNG/JPEG/WEBP.";
-    clearOutput();
-    setWorkspaceVisible(true);
-    return;
-  }
-
   if (activeRequestController) {
     activeRequestController.abort();
   }

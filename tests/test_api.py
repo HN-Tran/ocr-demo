@@ -50,6 +50,7 @@ class FakePipeline:
         self,
         *,
         image_bytes: bytes,
+        content_type: str | None,
         mode: str,
         schema_name: str | None,
         model: str | None,
@@ -59,6 +60,7 @@ class FakePipeline:
     ) -> Any:
         self.last_call = {
             "image_bytes": image_bytes,
+            "content_type": content_type,
             "mode": mode,
             "schema_name": schema_name,
             "model": model,
@@ -184,3 +186,22 @@ def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
     assert fake_pipeline.last_call["task"] == "describe_image"
     assert fake_pipeline.last_call["custom_prompt"] == "Beschreibe dieses Bild."
     assert fake_pipeline.last_call["token_limit"] == 8192
+
+
+def test_ocr_accepts_pdf_content_type() -> None:
+    fake_pipeline = FakePipeline()
+    response = asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=b"%PDF-1.4\n%%EOF", content_type="application/pdf"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRPipeline, fake_pipeline),
+        )
+    )
+    assert response["text"] == "hello world"
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"

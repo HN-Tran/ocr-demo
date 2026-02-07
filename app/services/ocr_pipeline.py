@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+import pypdfium2 as pdfium
 from PIL import Image, ImageOps
 
 from app.schemas import SCHEMA_REGISTRY
@@ -75,6 +76,39 @@ class OCRPipeline:
             image.save(output, format="PNG", optimize=True)
             return output.getvalue(), warnings
 
+    def _render_pdf_first_page(self, pdf_bytes: bytes) -> tuple[bytes, list[str]]:
+        warnings: list[str] = []
+        document = None
+        page = None
+        bitmap = None
+
+        try:
+            document = pdfium.PdfDocument(pdf_bytes)
+            page_count = len(document)
+            if page_count < 1:
+                raise ValueError("PDF enthält keine Seiten")
+            page = document[0]
+            bitmap = page.render(scale=2.0)
+            image = bitmap.to_pil()
+            output = BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            if page_count > 1:
+                warnings.append(
+                    f"PDF hat {page_count} Seiten; verarbeitet wurde nur Seite 1"
+                )
+            return output.getvalue(), warnings
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("PDF konnte nicht verarbeitet werden") from exc
+        finally:
+            if bitmap is not None and hasattr(bitmap, "close"):
+                bitmap.close()
+            if page is not None and hasattr(page, "close"):
+                page.close()
+            if document is not None and hasattr(document, "close"):
+                document.close()
+
     def _build_plain_prompt(self, *, task: str | None, custom_prompt: str | None) -> str:
         if custom_prompt and custom_prompt.strip():
             return custom_prompt.strip()
@@ -108,6 +142,7 @@ class OCRPipeline:
         self,
         *,
         image_bytes: bytes,
+        content_type: str | None = None,
         mode: str,
         schema_name: str | None,
         model: str | None = None,
@@ -120,7 +155,13 @@ class OCRPipeline:
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
         if selected_token_limit < 1:
             raise ValueError("token_limit muss eine positive ganze Zahl sein")
-        prepared_image, preprocess_warnings = self._preprocess(image_bytes)
+        if content_type == "application/pdf":
+            source_bytes, pdf_warnings = self._render_pdf_first_page(image_bytes)
+            warnings.extend(pdf_warnings)
+        else:
+            source_bytes = image_bytes
+
+        prepared_image, preprocess_warnings = self._preprocess(source_bytes)
         warnings.extend(preprocess_warnings)
 
         if mode == "plain":

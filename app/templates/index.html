@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OCR-Demo</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v={{ static_version }}" />
   </head>
   <body>
     <main class="page">
@@ -55,7 +55,7 @@
             </div>
             <div class="onboarding-actions">
               <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
-              <p class="onboarding-hint">Unterstützt PNG, JPEG, WEBP und PDF-Vorschau.</p>
+              <p class="onboarding-hint">Unterstützt PNG, JPEG, WEBP und PDF (erste Seite).</p>
             </div>
           </section>
 
@@ -169,6 +169,6 @@
       <div class="global-drop-card">Datei ablegen, um OCR zu starten</div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v={{ static_version }}"></script>
   </body>
 </html>

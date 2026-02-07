@@ -45,7 +45,7 @@ uv run uvicorn app.main:app --reload
 
 `POST /api/ocr` (multipart/form-data) Felder:
 
-- `file`: Bild (`image/png`, `image/jpeg`, `image/webp`)
+- `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `application/pdf`)
 - `mode`: `plain` oder `structured`
 - `schema_name`: erforderlich bei `mode=structured`
 - `model`: optionale Modell-Überschreibung
@@ -53,7 +53,7 @@ uv run uvicorn app.main:app --reload
 - `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`)
 - `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
 
-Hinweis: Die UI kann PDFs clientseitig vorschauen, die OCR-API akzeptiert derzeit nur Bilder.
+Hinweis: Bei PDF-Dateien wird aktuell die erste Seite verarbeitet.
 
 Response-Format:
 
