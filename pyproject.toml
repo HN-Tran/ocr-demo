@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ocr-demo"
-version = "0.1.0"
+version = "0.2.4"
 description = "Minimales OCR-Demo mit Ollama und FastAPI"
 readme = "README.md"
 requires-python = ">=3.10"

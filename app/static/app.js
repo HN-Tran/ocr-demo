@@ -7,6 +7,8 @@ const customPromptEl = document.getElementById("custom_prompt");
 const schemaNameEl = document.getElementById("schema_name");
 const modelEl = document.getElementById("model");
 const tokenLimitEl = document.getElementById("token_limit");
+const applyOptionsBtnEl = document.getElementById("apply-options-btn");
+const advancedDirtyHintEl = document.getElementById("advanced-dirty-hint");
 const taskWrap = document.getElementById("task-wrap");
 const customPromptWrap = document.getElementById("custom-prompt-wrap");
 const schemaWrap = document.getElementById("schema-wrap");
@@ -40,19 +42,13 @@ let lastResponse = null;
 let lastTableMatrices = [];
 let previewUrl = null;
 let activeRequestController = null;
-let rerunTimer = null;
 let globalDragDepth = 0;
+let hasPendingAdvancedChanges = false;
 const THEME_KEY = "ocr-demo-theme";
 const MAX_TOKEN_LIMIT = 128000;
-const PRESET_STRUCTURED_MODES = new Set([
-  "invoice_basic",
-  "receipt_basic",
-  "table_basic",
-  "business_card_basic",
-]);
 
 function isStructuredMode(modeValue) {
-  return modeValue === "structured" || PRESET_STRUCTURED_MODES.has(modeValue);
+  return modeValue === "structured";
 }
 
 function applyTheme(theme) {
@@ -93,6 +89,12 @@ function setAdvancedOpen(isOpen) {
 
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
+}
+
+function setAdvancedDirty(isDirty) {
+  hasPendingAdvancedChanges = isDirty;
+  applyOptionsBtnEl.disabled = !isDirty;
+  advancedDirtyHintEl.classList.toggle("hidden", !isDirty);
 }
 
 function clearOutput() {
@@ -209,31 +211,8 @@ function currentFile() {
   return fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
 }
 
-function scheduleAutoRun(delayMs = 0) {
-  if (!currentFile()) {
-    return;
-  }
-  if (rerunTimer !== null) {
-    clearTimeout(rerunTimer);
-    rerunTimer = null;
-  }
-  if (delayMs <= 0) {
-    void runOCR();
-    return;
-  }
-  rerunTimer = window.setTimeout(() => {
-    rerunTimer = null;
-    void runOCR();
-  }, delayMs);
-}
-
 function buildPayload() {
   const payload = new FormData(form);
-  const selectedMode = String(payload.get("mode") || "plain");
-  if (PRESET_STRUCTURED_MODES.has(selectedMode)) {
-    payload.set("mode", "structured");
-    payload.set("schema_name", selectedMode);
-  }
 
   const tokenLimitRaw = String(payload.get("token_limit") || "").trim();
   if (tokenLimitRaw) {
@@ -564,6 +543,7 @@ async function runOCR() {
     }
 
     lastResponse = data;
+    setAdvancedDirty(false);
     let displayText = data.text || "(kein Inhalt)";
     let tableMatrices = [];
 
@@ -735,36 +715,42 @@ window.addEventListener("drop", (event) => {
 });
 
 fileEl.addEventListener("change", () => {
-  if (rerunTimer !== null) {
-    clearTimeout(rerunTimer);
-    rerunTimer = null;
-  }
   setWorkspaceVisible(!!currentFile());
   updatePreview();
   void runOCR();
 });
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();
-  scheduleAutoRun();
+  setAdvancedDirty(true);
 });
 taskEl.addEventListener("change", () => {
-  scheduleAutoRun();
+  setAdvancedDirty(true);
 });
 schemaNameEl.addEventListener("change", () => {
-  scheduleAutoRun();
+  setAdvancedDirty(true);
 });
-modelEl.addEventListener("change", () => {
-  scheduleAutoRun();
+modelEl.addEventListener("input", () => {
+  setAdvancedDirty(true);
 });
 tokenLimitEl.addEventListener("input", () => {
-  scheduleAutoRun(450);
+  setAdvancedDirty(true);
 });
 customPromptEl.addEventListener("input", () => {
-  scheduleAutoRun(450);
+  setAdvancedDirty(true);
 });
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  scheduleAutoRun();
+  void runOCR();
+});
+applyOptionsBtnEl.addEventListener("click", () => {
+  if (!hasPendingAdvancedChanges) {
+    return;
+  }
+  if (!currentFile()) {
+    setAdvancedDirty(false);
+    return;
+  }
+  void runOCR();
 });
 initTheme();
 setAdvancedOpen(false);
@@ -772,6 +758,7 @@ toggleModeDependentFields();
 setWorkspaceVisible(false);
 clearPreview();
 setLoading(false);
+setAdvancedDirty(false);
 
 copyBtn.addEventListener("click", async () => {
   const text = lastResponse && lastResponse.mode === "structured" && lastResponse.structured

@@ -80,11 +80,7 @@
               Modus
               <select id="mode" name="mode">
                 <option value="plain">Klartext</option>
-                <option value="invoice_basic">Rechnung JSON</option>
-                <option value="receipt_basic">Beleg JSON</option>
-                <option value="table_basic">Tabelle JSON</option>
-                <option value="business_card_basic">Visitenkarte JSON</option>
-                <option value="structured">Strukturiertes JSON (benutzerdefiniertes Schema)</option>
+                <option value="structured">Strukturiertes JSON</option>
               </select>
             </label>
 
@@ -111,13 +107,13 @@
             </label>
 
             <label id="schema-wrap" class="hidden">
-              Schema (benutzerdefinierter strukturierter Modus)
+              Strukturiertes Schema
               <select id="schema_name" name="schema_name">
-                <option value="auto" selected>auto (passendes Schema erkennen)</option>
-                <option value="invoice_basic">invoice_basic</option>
-                <option value="receipt_basic">receipt_basic</option>
-                <option value="table_basic">table_basic</option>
-                <option value="business_card_basic">business_card_basic</option>
+                <option value="auto" selected>Automatisch erkennen</option>
+                <option value="invoice_basic">Rechnung</option>
+                <option value="receipt_basic">Beleg</option>
+                <option value="table_basic">Tabelle</option>
+                <option value="business_card_basic">Visitenkarte</option>
               </select>
             </label>
 
@@ -138,6 +134,15 @@
                 placeholder="{{ default_token_limit }}"
               />
             </label>
+
+            <div class="advanced-apply-row">
+              <button id="apply-options-btn" class="secondary-action" type="button" disabled>
+                Änderungen übernehmen
+              </button>
+              <span id="advanced-dirty-hint" class="advanced-dirty-hint hidden">
+                Es gibt nicht angewendete Änderungen.
+              </span>
+            </div>
           </div>
 
           <div class="control-row">

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from io import BytesIO
@@ -10,7 +11,7 @@ import pypdfium2 as pdfium
 from PIL import Image, ImageOps
 
 from app.schemas import SCHEMA_REGISTRY
-from app.services.ollama_client import OllamaClient
+from app.services.ollama_client import OllamaClient, OllamaError
 from app.services.structured import parse_structured_output
 
 PLAIN_TASK_OCR_TEXT = "ocr_text"
@@ -27,6 +28,70 @@ SUPPORTED_PLAIN_TASKS = (
 )
 MAX_TOKEN_LIMIT = 128000
 AUTO_SCHEMA_NAME = "auto"
+PLAIN_TASK_PROMPTS: dict[str, str] = {
+    PLAIN_TASK_DESCRIBE_IMAGE: "Describe this image briefly.",
+    PLAIN_TASK_READ_SCENE_TEXT: (
+        "Task: Transcribe all visible scene text exactly as shown.\n"
+        "Rules: Keep original language, casing, punctuation, and line breaks. Do not translate.\n"
+        "If no text is visible, output exactly: No visible text."
+    ),
+    PLAIN_TASK_TABLE_MARKDOWN: (
+        "Task: Extract all visible tables.\n"
+        "Output: Markdown tables only.\n"
+        "Rules: Preserve cell text exactly and do not translate.\n"
+        "If multiple tables exist, label them as 'Table 1', 'Table 2', etc.\n"
+        "If no table is present, output exactly: No table detected."
+    ),
+    PLAIN_TASK_SUMMARIZE_DOCUMENT: (
+        "Task: Summarize the document.\n"
+        "Output: 3-6 bullet points in German.\n"
+        "Rules: Keep names, numbers, and codes unchanged.\n"
+        "If no readable content exists, output exactly: Kein lesbarer Inhalt."
+    ),
+}
+PLAIN_TASK_RETRY_PROMPTS: dict[str, str] = {
+    PLAIN_TASK_OCR_TEXT: (
+        "Extrahiere sichtbaren Text exakt mit Zeilenumbrüchen. "
+        "Originalsprache beibehalten, nicht übersetzen. "
+        "Bild nicht beschreiben. Wenn kein Text sichtbar ist, gib exakt aus: Kein sichtbarer Text."
+    ),
+    PLAIN_TASK_DESCRIBE_IMAGE: (
+        "Describe this image in 1-3 concise sentences. Do not transcribe text."
+    ),
+    PLAIN_TASK_READ_SCENE_TEXT: (
+        "Transcribe visible text exactly. Keep original language and line breaks. "
+        "Output only text. If none: No visible text."
+    ),
+    PLAIN_TASK_TABLE_MARKDOWN: (
+        "Return visible tables as Markdown only. Do not translate cell text. "
+        "If none: No table detected."
+    ),
+    PLAIN_TASK_SUMMARIZE_DOCUMENT: (
+        "Summarize in 3-5 German bullet points. Output bullets only. "
+        "If unreadable: Kein lesbarer Inhalt."
+    ),
+}
+PLAIN_TASK_FINAL_RETRY_PROMPTS: dict[str, str] = {
+    PLAIN_TASK_OCR_TEXT: (
+        "Nur sichtbaren Text transkribieren. "
+        "Keine Anweisungen wiederholen. "
+        "Wenn kein Text sichtbar ist: Kein sichtbarer Text."
+    ),
+    PLAIN_TASK_DESCRIBE_IMAGE: (
+        "Describe what is visually happening in the image. "
+        "If text dominates, summarize it briefly instead of transcribing."
+    ),
+    PLAIN_TASK_READ_SCENE_TEXT: (
+        "Nur sichtbaren Text mit Zeilenumbrüchen transkribieren. "
+        "Keine Anweisungen wiederholen."
+    ),
+    PLAIN_TASK_TABLE_MARKDOWN: (
+        "Nur Tabellen als Markdown ausgeben. Keine Anweisungen wiederholen."
+    ),
+    PLAIN_TASK_SUMMARIZE_DOCUMENT: (
+        "Dokument in 3-5 deutschen Stichpunkten zusammenfassen. Keine Anweisungen wiederholen."
+    ),
+}
 
 
 @dataclass
@@ -117,37 +182,152 @@ class OCRPipeline:
             if document is not None and hasattr(document, "close"):
                 document.close()
 
-    def _build_plain_prompt(self, *, task: str | None, custom_prompt: str | None) -> str:
+    def _build_plain_prompt(self, *, selected_task: str, custom_prompt: str | None) -> str:
         if custom_prompt and custom_prompt.strip():
             return custom_prompt.strip()
 
-        selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
         if selected_task == PLAIN_TASK_OCR_TEXT:
             return self.plain_prompt_template
-        if selected_task == PLAIN_TASK_DESCRIBE_IMAGE:
-            return "Beschreibe dieses Bild knapp und sachlich. Gib nur Klartext zurück."
-        if selected_task == PLAIN_TASK_READ_SCENE_TEXT:
-            return (
-                "Lies und transkribiere den gesamten sichtbaren Text aus diesem Bild. "
-                "Wenn kein Text sichtbar ist, gib exakt aus: Kein sichtbarer Text."
-            )
-        if selected_task == PLAIN_TASK_TABLE_MARKDOWN:
-            return (
-                "Extrahiere alle sichtbaren Tabellen aus diesem Dokument. "
-                "Gib das Ergebnis als Markdown zurück. "
-                "Wenn mehrere Tabellen vorhanden sind, nummeriere sie mit Überschriften "
-                "(z. B. 'Tabelle 1'). "
-                "Wenn keine Tabelle vorhanden ist, gib exakt aus: Keine Tabelle erkannt."
-            )
-        if selected_task == PLAIN_TASK_SUMMARIZE_DOCUMENT:
-            return (
-                "Erstelle eine knappe, sachliche Zusammenfassung des Dokuments auf Deutsch. "
-                "Gib 3 bis 6 Stichpunkte zurück. "
-                "Wenn kein lesbarer Inhalt vorhanden ist, gib exakt aus: Kein lesbarer Inhalt."
-            )
+        if selected_task in PLAIN_TASK_PROMPTS:
+            return PLAIN_TASK_PROMPTS[selected_task]
         raise ValueError(
             f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
         )
+
+    def _build_plain_retry_prompt(self, *, selected_task: str) -> str:
+        if selected_task in PLAIN_TASK_RETRY_PROMPTS:
+            return PLAIN_TASK_RETRY_PROMPTS[selected_task]
+        raise ValueError(
+            f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
+        )
+
+    def _build_plain_final_retry_prompt(self, *, selected_task: str) -> str:
+        if selected_task in PLAIN_TASK_FINAL_RETRY_PROMPTS:
+            return PLAIN_TASK_FINAL_RETRY_PROMPTS[selected_task]
+        raise ValueError(
+            f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
+        )
+
+    def _looks_like_prompt_echo(self, *, prompt: str, output: str) -> bool:
+        prompt_norm = re.sub(r"[^0-9a-zA-ZäöüÄÖÜß]+", " ", prompt.strip().lower())
+        output_norm = re.sub(r"[^0-9a-zA-ZäöüÄÖÜß]+", " ", output.strip().lower())
+        prompt_norm = " ".join(prompt_norm.split())
+        output_norm = " ".join(output_norm.split())
+        if not prompt_norm or not output_norm:
+            return False
+        if output_norm == prompt_norm:
+            return True
+
+        if len(output_norm) >= 12 and prompt_norm.startswith(output_norm):
+            return True
+        if len(prompt_norm) >= 12 and output_norm.startswith(prompt_norm):
+            return True
+
+        min_match_len = max(12, int(len(prompt_norm) * 0.35))
+        if len(output_norm) >= min_match_len and output_norm in prompt_norm:
+            return True
+        if len(prompt_norm) >= min_match_len and prompt_norm in output_norm:
+            return True
+
+        instruction_markers = (
+            "task",
+            "rules",
+            "output",
+            "regeln",
+            "gib",
+            "extrahiere",
+            "beschreibe",
+            "do not",
+        )
+        marker_hits = sum(1 for marker in instruction_markers if marker in output_norm)
+        if marker_hits >= 2 and len(output_norm.split()) <= 34:
+            return True
+
+        instruction_fragments = (
+            "nur klartext",
+            "klartext zurueckgeben",
+            "klartext zurückgeben",
+            "only plain text",
+            "plain text only",
+            "antworte auf deutsch",
+            "answer in german",
+        )
+        if any(fragment in output_norm for fragment in instruction_fragments):
+            return True
+
+        prompt_tokens = {t for t in prompt_norm.split() if len(t) >= 3}
+        output_tokens = [t for t in output_norm.split() if len(t) >= 3]
+        if prompt_tokens and output_tokens:
+            overlap = sum(1 for token in output_tokens if token in prompt_tokens)
+            overlap_ratio = overlap / len(output_tokens)
+            if overlap_ratio >= 0.72 and len(output_tokens) <= 24:
+                return True
+        return False
+
+    def _looks_like_image_description(self, output: str) -> bool:
+        normalized = " ".join(output.strip().lower().split())
+        if not normalized:
+            return False
+        description_markers = (
+            "das bild zeigt",
+            "auf dem bild",
+            "im bild ist",
+            "im bild sind",
+            "this image shows",
+            "the image shows",
+            "in the image",
+            "a photo of",
+            "an image of",
+        )
+        return any(marker in normalized for marker in description_markers)
+
+    def _looks_like_ocr_transcript(self, output: str) -> bool:
+        normalized = output.strip()
+        if not normalized:
+            return False
+
+        lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return False
+
+        short_lines = sum(1 for line in lines if len(line.split()) <= 5)
+        numeric_like = sum(1 for line in lines if any(ch.isdigit() for ch in line))
+        field_like = sum(1 for line in lines if any(token in line for token in (":", "#", "=", "/", "|")))
+        upper_heavy = sum(
+            1
+            for line in lines
+            if len(line) >= 6
+            and (sum(1 for ch in line if ch.isupper()) / max(1, sum(1 for ch in line if ch.isalpha()))) > 0.6
+        )
+
+        if short_lines >= max(3, int(len(lines) * 0.6)) and (numeric_like >= 2 or field_like >= 2):
+            return True
+        if len(lines) == 2 and numeric_like >= 1 and field_like >= 1 and short_lines == 2:
+            return True
+        if numeric_like >= 3 and field_like >= 1:
+            return True
+        if upper_heavy >= 2 and numeric_like >= 1:
+            return True
+
+        return False
+
+    def _is_no_visible_text(self, output: str) -> bool:
+        normalized = " ".join(output.strip().lower().split())
+        if not normalized:
+            return True
+        no_text_markers = (
+            "kein sichtbarer text",
+            "kein text sichtbar",
+            "no visible text",
+            "no text visible",
+        )
+        return any(marker in normalized for marker in no_text_markers)
+
+    def _empty_structured_for_schema(self, schema_fields: dict[str, str]) -> dict[str, object]:
+        empty_payload: dict[str, object] = {}
+        for key, field_type in schema_fields.items():
+            empty_payload[key] = [] if field_type.startswith("array") else None
+        return empty_payload
 
     def _build_structured_prompt(self, schema_name: str) -> str:
         schema = SCHEMA_REGISTRY.get(schema_name)
@@ -165,11 +345,11 @@ class OCRPipeline:
             f"- {name}: {meta['description']}" for name, meta in SCHEMA_REGISTRY.items()
         ]
         return (
-            "Du klassifizierst ein Dokument in genau eines der folgenden OCR-Schemata.\n"
-            "Antwortformat: Gib ausschließlich den schema_name zurück, ohne Zusatztext.\n"
-            "Verfügbare schema_name:\n"
+            "You classify a document into exactly one OCR schema.\n"
+            "Output format: return only the schema_name and nothing else.\n"
+            "Available schema_name:\n"
             f"{chr(10).join(schema_lines)}\n"
-            f"Erlaubte Antworten: {', '.join(SCHEMA_REGISTRY.keys())}"
+            f"Allowed answers: {', '.join(SCHEMA_REGISTRY.keys())}"
         )
 
     async def _auto_detect_schema(
@@ -210,8 +390,10 @@ class OCRPipeline:
         token_limit: int | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
-        selected_model = model or self.default_model
+        selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
+        selected_model = (model or "").strip() or self.default_model
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
+        has_custom_plain_prompt = bool(custom_prompt and custom_prompt.strip())
         if selected_token_limit < 1:
             raise ValueError("token_limit muss eine positive ganze Zahl sein")
         if selected_token_limit > MAX_TOKEN_LIMIT:
@@ -226,7 +408,9 @@ class OCRPipeline:
         warnings.extend(preprocess_warnings)
 
         if mode == "plain":
-            prompt = self._build_plain_prompt(task=task, custom_prompt=custom_prompt)
+            prompt = self._build_plain_prompt(
+                selected_task=selected_plain_task, custom_prompt=custom_prompt
+            )
             resolved_schema_name = None
         elif mode == "structured":
             if custom_prompt and custom_prompt.strip():
@@ -252,10 +436,79 @@ class OCRPipeline:
             model=selected_model,
             num_ctx=selected_token_limit,
         )
+        if mode == "plain" and not has_custom_plain_prompt:
+            should_retry = self._looks_like_prompt_echo(prompt=prompt, output=raw_output)
+            if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
+                raw_output
+            ):
+                warnings.append(
+                    "Antwort wirkte wie Bildbeschreibung statt OCR-Text; Anfrage mit Kurzprompt wiederholt."
+                )
+                should_retry = True
+            if selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE and self._looks_like_ocr_transcript(
+                raw_output
+            ):
+                warnings.append(
+                    "Bildbeschreibung wirkte wie OCR-Transkript; Anfrage mit beschreibendem Kurzprompt wiederholt."
+                )
+                should_retry = True
+            if should_retry:
+                retry_prompt = self._build_plain_retry_prompt(selected_task=selected_plain_task)
+                if self._looks_like_prompt_echo(prompt=prompt, output=raw_output):
+                    warnings.append("Prompt-Echo erkannt; Anfrage mit Kurzprompt wiederholt.")
+                raw_output = await self.ollama_client.run_ocr(
+                    image_bytes=prepared_image,
+                    prompt=retry_prompt,
+                    model=selected_model,
+                    num_ctx=selected_token_limit,
+                )
+                needs_final_retry = False
+                if self._looks_like_prompt_echo(prompt=retry_prompt, output=raw_output):
+                    warnings.append("Modell gibt weiterhin promptähnlichen Text zurück.")
+                    needs_final_retry = True
+                if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
+                    raw_output
+                ):
+                    warnings.append(
+                        "Antwort wirkte weiterhin wie Bildbeschreibung statt OCR-Text."
+                    )
+                    needs_final_retry = True
+                if selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE and self._looks_like_ocr_transcript(
+                    raw_output
+                ):
+                    warnings.append("Antwort wirkte weiterhin wie OCR-Transkript; finaler Retry.")
+                    needs_final_retry = True
+
+                if needs_final_retry:
+                    final_retry_prompt = self._build_plain_final_retry_prompt(
+                        selected_task=selected_plain_task
+                    )
+                    raw_output = await self.ollama_client.run_ocr(
+                        image_bytes=prepared_image,
+                        prompt=final_retry_prompt,
+                        model=selected_model,
+                        num_ctx=selected_token_limit,
+                    )
+                    if self._looks_like_prompt_echo(prompt=final_retry_prompt, output=raw_output):
+                        warnings.append("Modell spiegelt weiterhin die Anweisung statt Inhalt.")
+                    if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
+                        raw_output
+                    ):
+                        warnings.append("Modell liefert weiterhin Bildbeschreibung statt OCR-Text.")
         latency_ms = int((time.perf_counter() - start) * 1000)
 
         if mode == "plain":
             text = raw_output.strip()
+            if (
+                not has_custom_plain_prompt
+                and text
+                and self._looks_like_prompt_echo(prompt=prompt, output=text)
+            ):
+                warnings.append("Ausgabe wurde als Prompt-Echo verworfen.")
+                if selected_plain_task == PLAIN_TASK_OCR_TEXT:
+                    text = "Kein verwertbarer OCR-Text erkannt."
+                elif selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE:
+                    text = "Keine verwertbare Bildbeschreibung erzeugt."
             structured = None
         else:
             schema = SCHEMA_REGISTRY[resolved_schema_name or ""]
@@ -263,6 +516,21 @@ class OCRPipeline:
             warnings.extend(parse_result.warnings)
             text = raw_output.strip()
             structured = parse_result.data
+            if structured is not None:
+                try:
+                    evidence_text = await self.ollama_client.run_ocr(
+                        image_bytes=prepared_image,
+                        prompt=self.plain_prompt_template,
+                        model=selected_model,
+                        num_ctx=min(selected_token_limit, 4096),
+                    )
+                    if self._is_no_visible_text(evidence_text):
+                        structured = self._empty_structured_for_schema(schema["fields"])
+                        warnings.append(
+                            "Kein sichtbarer Text erkannt; strukturierte Felder wurden auf null gesetzt."
+                        )
+                except OllamaError as exc:
+                    warnings.append(f"Evidenzprüfung für strukturierte Ausgabe übersprungen: {exc}")
 
         return OCRResult(
             text=text,
