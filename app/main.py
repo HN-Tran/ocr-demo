@@ -10,13 +10,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import router
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
+def _normalize_base_path(value: str) -> str:
+    path = value.strip()
+    if not path or path == "/":
+        return ""
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return path.rstrip("/")
+
+
+def _create_ocr_app(*, settings: Settings) -> FastAPI:
     app = FastAPI(title=settings.app_name)
 
     logger = logging.getLogger("ocr-demo")
@@ -49,6 +57,7 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request) -> HTMLResponse:
         version = cast(str, request.app.state.static_version)
+        app_base_path = cast(str, request.scope.get("root_path", ""))
         return templates.TemplateResponse(
             request=request,
             name="index.html",
@@ -56,10 +65,23 @@ def create_app() -> FastAPI:
                 "default_model": settings.ollama_model,
                 "default_token_limit": settings.default_token_limit,
                 "static_version": version,
+                "app_base_path": app_base_path,
             },
         )
 
     return app
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    ocr_app = _create_ocr_app(settings=settings)
+    base_path = _normalize_base_path(settings.app_base_path)
+    if not base_path:
+        return ocr_app
+
+    root_app = FastAPI(title=settings.app_name)
+    root_app.mount(base_path, ocr_app)
+    return root_app
 
 
 app = create_app()

@@ -25,6 +25,7 @@ def _env_float(key: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     app_name: str
+    app_base_path: str
     ollama_base_url: str
     ollama_model: str
     default_token_limit: int
@@ -44,6 +45,7 @@ def get_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "OCR-Demo"),
+        app_base_path=os.getenv("APP_BASE_PATH", ""),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "glm-ocr:latest"),
         default_token_limit=default_token_limit,

@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OCR-Demo</title>
-    <link rel="stylesheet" href="/static/styles.css?v={{ static_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('static', path='styles.css') }}?v={{ static_version }}" />
   </head>
-  <body>
+  <body data-base-path="{{ app_base_path }}">
     <main class="page">
       <section class="panel panel-input">
         <div class="heading-row">
@@ -187,6 +187,6 @@
       <div class="global-drop-card">Datei ablegen, um OCR zu starten</div>
     </div>
 
-    <script src="/static/app.js?v={{ static_version }}"></script>
+    <script src="{{ request.url_for('static', path='app.js') }}?v={{ static_version }}"></script>
   </body>
 </html>

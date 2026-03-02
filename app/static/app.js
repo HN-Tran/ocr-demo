@@ -37,6 +37,8 @@ const previewEmptyEl = document.getElementById("preview-empty");
 const previewImageEl = document.getElementById("preview-image");
 const previewPdfEl = document.getElementById("preview-pdf");
 const previewPdfLinkEl = document.getElementById("preview-pdf-link");
+const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
+const ocrEndpoint = `${appBasePath}/api/ocr`;
 
 let lastResponse = null;
 let lastTableMatrices = [];
@@ -532,7 +534,7 @@ async function runOCR() {
     const payload = buildPayload();
     const requestMode = String(payload.get("mode") || "plain");
     const requestTask = String(payload.get("task") || "");
-    const response = await fetch("/api/ocr", {
+    const response = await fetch(ocrEndpoint, {
       method: "POST",
       body: payload,
       signal: controller.signal,
