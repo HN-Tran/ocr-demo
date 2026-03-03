@@ -119,7 +119,16 @@ async def ocr(
 
 
 # Backward-compatible alias paths for external clients.
+router.add_api_route("/health/", health, methods=["GET"], include_in_schema=False)
+router.add_api_route("/models/", models, methods=["GET"], include_in_schema=False)
+router.add_api_route("/schemas/", schemas, methods=["GET"], include_in_schema=False)
+router.add_api_route("/ocr/", ocr, methods=["POST"], include_in_schema=False)
+
 router.add_api_route("/v1/health", health, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/models", models, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/schemas", schemas, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/ocr", ocr, methods=["POST"], include_in_schema=False)
+router.add_api_route("/v1/health/", health, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/models/", models, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/schemas/", schemas, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/ocr/", ocr, methods=["POST"], include_in_schema=False)

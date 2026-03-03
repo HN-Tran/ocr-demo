@@ -216,7 +216,15 @@ def test_ocr_accepts_pdf_content_type() -> None:
 
 def test_api_v1_alias_routes_exist() -> None:
     route_paths = {route.path for route in router.routes}
+    assert "/api/health/" in route_paths
+    assert "/api/models/" in route_paths
+    assert "/api/schemas/" in route_paths
+    assert "/api/ocr/" in route_paths
     assert "/api/v1/health" in route_paths
     assert "/api/v1/models" in route_paths
     assert "/api/v1/schemas" in route_paths
     assert "/api/v1/ocr" in route_paths
+    assert "/api/v1/health/" in route_paths
+    assert "/api/v1/models/" in route_paths
+    assert "/api/v1/schemas/" in route_paths
+    assert "/api/v1/ocr/" in route_paths
