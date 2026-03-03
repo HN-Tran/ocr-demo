@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
@@ -149,36 +150,41 @@ class OCRPipeline:
             image.save(output, format="PNG", optimize=True)
             return output.getvalue(), warnings
 
-    def _render_pdf_first_page(self, pdf_bytes: bytes) -> tuple[bytes, list[str]]:
+    def _render_pdf_pages(self, pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
         warnings: list[str] = []
         document = None
-        page = None
-        bitmap = None
+        rendered_pages: list[bytes] = []
 
         try:
             document = pdfium.PdfDocument(pdf_bytes)
             page_count = len(document)
             if page_count < 1:
                 raise ValueError("PDF enthält keine Seiten")
-            page = document[0]
-            bitmap = page.render(scale=2.0)
-            image = bitmap.to_pil()
-            output = BytesIO()
-            image.save(output, format="PNG", optimize=True)
+
+            for page_index in range(page_count):
+                page = None
+                bitmap = None
+                try:
+                    page = document[page_index]
+                    bitmap = page.render(scale=2.0)
+                    image = bitmap.to_pil()
+                    output = BytesIO()
+                    image.save(output, format="PNG", optimize=True)
+                    rendered_pages.append(output.getvalue())
+                finally:
+                    if bitmap is not None and hasattr(bitmap, "close"):
+                        bitmap.close()
+                    if page is not None and hasattr(page, "close"):
+                        page.close()
+
             if page_count > 1:
-                warnings.append(
-                    f"PDF hat {page_count} Seiten; verarbeitet wurde nur Seite 1"
-                )
-            return output.getvalue(), warnings
+                warnings.append(f"PDF hat {page_count} Seiten; alle Seiten wurden verarbeitet")
+            return rendered_pages, warnings
         except ValueError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise ValueError("PDF konnte nicht verarbeitet werden") from exc
         finally:
-            if bitmap is not None and hasattr(bitmap, "close"):
-                bitmap.close()
-            if page is not None and hasattr(page, "close"):
-                page.close()
             if document is not None and hasattr(document, "close"):
                 document.close()
 
@@ -377,66 +383,52 @@ class OCRPipeline:
             "Schema konnte nicht automatisch erkannt werden. Bitte schema_name manuell wählen."
         )
 
-    async def run(
-        self,
-        *,
-        image_bytes: bytes,
-        content_type: str | None = None,
-        mode: str,
-        schema_name: str | None,
-        model: str | None = None,
-        task: str | None = None,
-        custom_prompt: str | None = None,
-        token_limit: int | None = None,
-    ) -> OCRResult:
+    @staticmethod
+    def _with_page_prefix(warning: str, page_number: int, total_pages: int) -> str:
+        if total_pages <= 1:
+            return warning
+        return f"Seite {page_number}: {warning}"
+
+    def _prepare_images(
+        self, *, image_bytes: bytes, content_type: str | None
+    ) -> tuple[list[bytes], list[str]]:
         warnings: list[str] = []
-        selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
-        selected_model = (model or "").strip() or self.default_model
-        selected_token_limit = self.default_token_limit if token_limit is None else token_limit
-        has_custom_plain_prompt = bool(custom_prompt and custom_prompt.strip())
-        if selected_token_limit < 1:
-            raise ValueError("token_limit muss eine positive ganze Zahl sein")
-        if selected_token_limit > MAX_TOKEN_LIMIT:
-            raise ValueError(f"token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
         if content_type == "application/pdf":
-            source_bytes, pdf_warnings = self._render_pdf_first_page(image_bytes)
+            source_images, pdf_warnings = self._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
         else:
-            source_bytes = image_bytes
+            source_images = [image_bytes]
 
-        prepared_image, preprocess_warnings = self._preprocess(source_bytes)
-        warnings.extend(preprocess_warnings)
-
-        if mode == "plain":
-            prompt = self._build_plain_prompt(
-                selected_task=selected_plain_task, custom_prompt=custom_prompt
+        prepared_images: list[bytes] = []
+        total_pages = len(source_images)
+        for idx, page_image in enumerate(source_images, start=1):
+            prepared_image, preprocess_warnings = self._preprocess(page_image)
+            prepared_images.append(prepared_image)
+            warnings.extend(
+                self._with_page_prefix(warning, idx, total_pages)
+                for warning in preprocess_warnings
             )
-            resolved_schema_name = None
-        elif mode == "structured":
-            if custom_prompt and custom_prompt.strip():
-                raise ValueError("custom_prompt wird nur im Klartextmodus unterstützt")
-            if task and task.strip() and task.strip() != PLAIN_TASK_OCR_TEXT:
-                raise ValueError("task wird nur im Klartextmodus unterstützt")
-            resolved_schema_name = (schema_name or "").strip()
-            if not resolved_schema_name or resolved_schema_name == AUTO_SCHEMA_NAME:
-                resolved_schema_name = await self._auto_detect_schema(
-                    prepared_image=prepared_image,
-                    selected_model=selected_model,
-                    selected_token_limit=selected_token_limit,
-                )
-                warnings.append(f"Automatisch erkanntes Schema: {resolved_schema_name}")
-            prompt = self._build_structured_prompt(resolved_schema_name)
-        else:
-            raise ValueError(f"Nicht unterstützter Modus '{mode}'")
+        return prepared_images, warnings
 
-        start = time.perf_counter()
+    async def _run_plain_on_image(
+        self,
+        *,
+        prepared_image: bytes,
+        prompt: str,
+        selected_plain_task: str,
+        selected_model: str,
+        selected_token_limit: int,
+        has_custom_plain_prompt: bool,
+    ) -> tuple[str, list[str]]:
+        warnings: list[str] = []
         raw_output = await self.ollama_client.run_ocr(
             image_bytes=prepared_image,
             prompt=prompt,
             model=selected_model,
             num_ctx=selected_token_limit,
         )
-        if mode == "plain" and not has_custom_plain_prompt:
+
+        if not has_custom_plain_prompt:
             should_retry = self._looks_like_prompt_echo(prompt=prompt, output=raw_output)
             if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
                 raw_output
@@ -495,36 +487,202 @@ class OCRPipeline:
                         raw_output
                     ):
                         warnings.append("Modell liefert weiterhin Bildbeschreibung statt OCR-Text.")
-        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        text = raw_output.strip()
+        if not has_custom_plain_prompt and text and self._looks_like_prompt_echo(prompt=prompt, output=text):
+            warnings.append("Ausgabe wurde als Prompt-Echo verworfen.")
+            if selected_plain_task == PLAIN_TASK_OCR_TEXT:
+                text = "Kein verwertbarer OCR-Text erkannt."
+            elif selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE:
+                text = "Keine verwertbare Bildbeschreibung erzeugt."
+        return text, warnings
+
+    @staticmethod
+    def _is_missing_structured_value(value: object) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str) and not value.strip():
+            return True
+        if isinstance(value, list) and len(value) == 0:
+            return True
+        return False
+
+    def _merge_structured_payloads(
+        self, *, payloads: list[dict[str, object]], schema_fields: dict[str, str]
+    ) -> tuple[dict[str, object], list[str]]:
+        merged = self._empty_structured_for_schema(schema_fields)
+        warnings: list[str] = []
+
+        for field, field_type in schema_fields.items():
+            is_array = field_type.startswith("array")
+            for page_index, payload in enumerate(payloads, start=1):
+                value = payload.get(field)
+                if self._is_missing_structured_value(value):
+                    continue
+
+                if is_array:
+                    target = merged[field]
+                    if not isinstance(target, list):
+                        target = []
+                    if isinstance(value, list):
+                        for item in value:
+                            if item not in target:
+                                target.append(item)
+                    else:
+                        if value not in target:
+                            target.append(value)
+                    merged[field] = target
+                    continue
+
+                current = merged[field]
+                if self._is_missing_structured_value(current):
+                    merged[field] = value
+                    continue
+                if current != value:
+                    warnings.append(
+                        f"Konflikt bei Feld '{field}' zwischen Seiten; Wert von Seite 1 wird beibehalten (abweichend auf Seite {page_index})."
+                    )
+        return merged, warnings
+
+    async def run(
+        self,
+        *,
+        image_bytes: bytes,
+        content_type: str | None = None,
+        mode: str,
+        schema_name: str | None,
+        model: str | None = None,
+        task: str | None = None,
+        custom_prompt: str | None = None,
+        token_limit: int | None = None,
+    ) -> OCRResult:
+        warnings: list[str] = []
+        selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
+        selected_model = (model or "").strip() or self.default_model
+        selected_token_limit = self.default_token_limit if token_limit is None else token_limit
+        has_custom_plain_prompt = bool(custom_prompt and custom_prompt.strip())
+        if selected_token_limit < 1:
+            raise ValueError("token_limit muss eine positive ganze Zahl sein")
+        if selected_token_limit > MAX_TOKEN_LIMIT:
+            raise ValueError(f"token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
+
+        prepared_images, prepare_warnings = self._prepare_images(
+            image_bytes=image_bytes, content_type=content_type
+        )
+        warnings.extend(prepare_warnings)
+        total_pages = len(prepared_images)
 
         if mode == "plain":
-            text = raw_output.strip()
-            if (
-                not has_custom_plain_prompt
-                and text
-                and self._looks_like_prompt_echo(prompt=prompt, output=text)
-            ):
-                warnings.append("Ausgabe wurde als Prompt-Echo verworfen.")
-                if selected_plain_task == PLAIN_TASK_OCR_TEXT:
-                    text = "Kein verwertbarer OCR-Text erkannt."
-                elif selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE:
-                    text = "Keine verwertbare Bildbeschreibung erzeugt."
+            prompt = self._build_plain_prompt(
+                selected_task=selected_plain_task, custom_prompt=custom_prompt
+            )
+            resolved_schema_name = None
+        elif mode == "structured":
+            if custom_prompt and custom_prompt.strip():
+                raise ValueError("custom_prompt wird nur im Klartextmodus unterstützt")
+            if task and task.strip() and task.strip() != PLAIN_TASK_OCR_TEXT:
+                raise ValueError("task wird nur im Klartextmodus unterstützt")
+            resolved_schema_name = (schema_name or "").strip()
+            if not resolved_schema_name or resolved_schema_name == AUTO_SCHEMA_NAME:
+                last_detect_error: ValueError | None = None
+                for prepared_image in prepared_images:
+                    try:
+                        resolved_schema_name = await self._auto_detect_schema(
+                            prepared_image=prepared_image,
+                            selected_model=selected_model,
+                            selected_token_limit=selected_token_limit,
+                        )
+                        break
+                    except ValueError as exc:
+                        last_detect_error = exc
+                if not resolved_schema_name or resolved_schema_name == AUTO_SCHEMA_NAME:
+                    raise last_detect_error or ValueError(
+                        "Schema konnte nicht automatisch erkannt werden. Bitte schema_name manuell wählen."
+                    )
+                warnings.append(f"Automatisch erkanntes Schema: {resolved_schema_name}")
+            prompt = self._build_structured_prompt(resolved_schema_name)
+        else:
+            raise ValueError(f"Nicht unterstützter Modus '{mode}'")
+
+        start = time.perf_counter()
+
+        if mode == "plain":
+            page_texts: list[str] = []
+            for page_index, prepared_image in enumerate(prepared_images, start=1):
+                page_text, page_warnings = await self._run_plain_on_image(
+                    prepared_image=prepared_image,
+                    prompt=prompt,
+                    selected_plain_task=selected_plain_task,
+                    selected_model=selected_model,
+                    selected_token_limit=selected_token_limit,
+                    has_custom_plain_prompt=has_custom_plain_prompt,
+                )
+                page_texts.append(page_text)
+                warnings.extend(
+                    self._with_page_prefix(warning, page_index, total_pages)
+                    for warning in page_warnings
+                )
+
+            if total_pages <= 1:
+                text = page_texts[0] if page_texts else ""
+            else:
+                text = "\n\n".join(
+                    f"--- Seite {page_index} ---\n{page_texts[page_index - 1]}"
+                    for page_index in range(1, total_pages + 1)
+                )
             structured = None
         else:
             schema = SCHEMA_REGISTRY[resolved_schema_name or ""]
-            parse_result = parse_structured_output(raw_output, list(schema["fields"].keys()))
-            warnings.extend(parse_result.warnings)
-            text = raw_output.strip()
-            structured = parse_result.data
+            expected_fields = list(schema["fields"].keys())
+
+            raw_outputs: list[str] = []
+            parsed_payloads: list[dict[str, object]] = []
+            for page_index, prepared_image in enumerate(prepared_images, start=1):
+                raw_output = await self.ollama_client.run_ocr(
+                    image_bytes=prepared_image,
+                    prompt=prompt,
+                    model=selected_model,
+                    num_ctx=selected_token_limit,
+                )
+                raw_outputs.append(raw_output.strip())
+                parse_result = parse_structured_output(raw_output, expected_fields)
+                warnings.extend(
+                    self._with_page_prefix(warning, page_index, total_pages)
+                    for warning in parse_result.warnings
+                )
+                if parse_result.data is not None:
+                    parsed_payloads.append(cast(dict[str, object], parse_result.data))
+
+            if total_pages <= 1:
+                text = raw_outputs[0] if raw_outputs else ""
+            else:
+                text = "\n\n".join(
+                    f"--- Seite {page_index} ---\n{raw_outputs[page_index - 1]}"
+                    for page_index in range(1, total_pages + 1)
+                )
+
+            structured = None
+            if parsed_payloads:
+                structured, merge_warnings = self._merge_structured_payloads(
+                    payloads=parsed_payloads,
+                    schema_fields=cast(dict[str, str], schema["fields"]),
+                )
+                warnings.extend(merge_warnings)
+
             if structured is not None:
                 try:
-                    evidence_text = await self.ollama_client.run_ocr(
-                        image_bytes=prepared_image,
-                        prompt=self.plain_prompt_template,
-                        model=selected_model,
-                        num_ctx=min(selected_token_limit, 4096),
-                    )
-                    if self._is_no_visible_text(evidence_text):
+                    has_visible_text = False
+                    for prepared_image in prepared_images:
+                        evidence_text = await self.ollama_client.run_ocr(
+                            image_bytes=prepared_image,
+                            prompt=self.plain_prompt_template,
+                            model=selected_model,
+                            num_ctx=min(selected_token_limit, 4096),
+                        )
+                        if not self._is_no_visible_text(evidence_text):
+                            has_visible_text = True
+                            break
+                    if not has_visible_text:
                         structured = self._empty_structured_for_schema(schema["fields"])
                         warnings.append(
                             "Kein sichtbarer Text erkannt; strukturierte Felder wurden auf null gesetzt."
@@ -532,6 +690,7 @@ class OCRPipeline:
                 except OllamaError as exc:
                     warnings.append(f"Evidenzprüfung für strukturierte Ausgabe übersprungen: {exc}")
 
+        latency_ms = int((time.perf_counter() - start) * 1000)
         return OCRResult(
             text=text,
             structured=structured,

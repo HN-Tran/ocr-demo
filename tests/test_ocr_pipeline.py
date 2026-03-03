@@ -8,9 +8,9 @@ import pytest
 from PIL import Image
 
 from app.services.ocr_pipeline import (
-    OCRPipeline,
     PLAIN_TASK_DESCRIBE_IMAGE,
     PLAIN_TASK_PROMPTS,
+    OCRPipeline,
 )
 from app.services.ollama_client import OllamaClient
 
@@ -45,10 +45,14 @@ class FakeOllamaClient:
         return "ok"
 
 
-def _pdf_bytes() -> bytes:
-    image = Image.new("RGB", (12, 12), color=(255, 255, 255))
+def _pdf_bytes(page_count: int = 1) -> bytes:
+    first_image = Image.new("RGB", (12, 12), color=(255, 255, 255))
+    extra_images = [Image.new("RGB", (12, 12), color=(255, 255, 255)) for _ in range(page_count - 1)]
     output = BytesIO()
-    image.save(output, format="PDF")
+    if extra_images:
+        first_image.save(output, format="PDF", save_all=True, append_images=extra_images)
+    else:
+        first_image.save(output, format="PDF")
     return output.getvalue()
 
 
@@ -430,6 +434,26 @@ def test_pdf_input_is_rendered_to_png_before_ollama_call() -> None:
         )
     )
     assert fake_client.last_image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_multi_page_pdf_plain_processes_all_pages() -> None:
+    fake_client = FakeOllamaClient(responses=["Seite 1 Text", "Seite 2 Text"])
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_pdf_bytes(page_count=2),
+            content_type="application/pdf",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+
+    assert len(fake_client.prompts) == 2
+    assert "--- Seite 1 ---" in result.text
+    assert "--- Seite 2 ---" in result.text
+    assert "Seite 1 Text" in result.text
+    assert "Seite 2 Text" in result.text
+    assert any("alle Seiten wurden verarbeitet" in warning for warning in result.warnings)
 
 
 def test_invalid_pdf_raises_validation_error() -> None:

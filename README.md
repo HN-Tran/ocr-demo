@@ -61,7 +61,7 @@ Beispiele für `schema_name`:
 - `table_basic`
 - `business_card_basic`
 
-Hinweis: Bei PDF-Dateien wird aktuell die erste Seite verarbeitet.
+Hinweis: Bei PDF-Dateien werden alle Seiten verarbeitet.
 
 Response-Format:
 
