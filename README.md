@@ -48,7 +48,10 @@ uv run uvicorn app.main:app --reload
 
 ## API
 
-`POST /api/ocr` (multipart/form-data) Felder:
+`POST /api/ocr` akzeptiert entweder `multipart/form-data` oder einen rohen Body mit
+`Content-Type: application/octet-stream`.
+
+Multipart-Felder:
 
 - `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`)
 - `mode`: `plain` oder `structured`
@@ -60,6 +63,24 @@ uv run uvicorn app.main:app --reload
 - `expert_enable_layout`: optionales Layout-Override für `backend=expert` (`true|false`)
 - `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
 - `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
+
+Raw-Upload (`application/octet-stream`):
+
+- Der Request-Body enthält direkt die Datei-Bytes.
+- `mode`, `schema_name`, `backend`, `model`, `token_limit`, `gif_max_frames`,
+  `expert_enable_layout`, `task` und `custom_prompt` können als Query-Parameter
+  übergeben werden.
+- Der Server erkennt `png`, `jpeg`, `webp`, `gif`, `tiff` und `pdf` anhand der
+  Dateisignatur automatisch.
+
+PowerShell-Beispiel:
+
+```powershell
+Invoke-RestMethod -Method POST `
+  -Uri 'https://HOST/api/ocr?backend=direct&mode=plain' `
+  -ContentType 'application/octet-stream' `
+  -InFile 'C:\path\scan.tiff'
+```
 
 Beispiele für `schema_name`:
 

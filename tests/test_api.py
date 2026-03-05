@@ -34,11 +34,30 @@ def _upload_file(*, content: bytes, content_type: str) -> UploadFile:
     return cast(UploadFile, FakeUploadFile(content=content, content_type=content_type))
 
 
-def _request() -> Request:
-    logger = logging.getLogger("test")
+class FakeRequest:
+    def __init__(
+        self,
+        *,
+        body: bytes = b"",
+        content_type: str | None = None,
+        query_params: dict[str, str] | None = None,
+    ) -> None:
+        logger = logging.getLogger("test")
+        self.app = SimpleNamespace(state=SimpleNamespace(logger=logger))
+        self.headers = {} if content_type is None else {"content-type": content_type}
+        self.query_params = query_params or {}
+        self._body = body
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+def _request(
+    *, body: bytes = b"", content_type: str | None = None, query_params: dict[str, str] | None = None
+) -> Request:
     return cast(
         Request,
-        SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(logger=logger))),
+        FakeRequest(body=body, content_type=content_type, query_params=query_params),
     )
 
 
@@ -282,6 +301,79 @@ def test_ocr_accepts_gif_content_type() -> None:
     )
     assert response["text"] == "hello world"
     assert fake_pipeline.last_call["content_type"] == "image/gif"
+
+
+def test_ocr_accepts_octet_stream_body() -> None:
+    fake_pipeline = FakeBackendRouter()
+    response = asyncio.run(
+        ocr(
+            request=_request(body=_png_bytes(), content_type="application/octet-stream"),
+            file=None,
+            mode=None,
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert response["text"] == "hello world"
+    assert fake_pipeline.last_call["content_type"] == "image/png"
+    assert fake_pipeline.last_call["mode"] == "plain"
+
+
+def test_ocr_octet_stream_reads_query_parameters() -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(
+                body=b"%PDF-1.4\n%%EOF",
+                content_type="application/octet-stream",
+                query_params={
+                    "mode": "plain",
+                    "backend": "expert",
+                    "task": "describe_image",
+                    "token_limit": "8192",
+                    "gif_max_frames": "6",
+                    "expert_enable_layout": "false",
+                },
+            ),
+            file=None,
+            mode=None,
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"
+    assert fake_pipeline.last_call["backend"] == "expert"
+    assert fake_pipeline.last_call["task"] == "describe_image"
+    assert fake_pipeline.last_call["token_limit"] == 8192
+    assert fake_pipeline.last_call["gif_max_frames"] == 6
+    assert fake_pipeline.last_call["expert_enable_layout"] is False
+
+
+def test_ocr_rejects_unknown_octet_stream_body() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            ocr(
+                request=_request(body=b"not-an-image", content_type="application/octet-stream"),
+                file=None,
+                mode=None,
+                schema_name=None,
+                model=None,
+                task=None,
+                custom_prompt=None,
+                token_limit=None,
+                pipeline=_pipeline(),
+            )
+        )
+    assert exc_info.value.status_code == 400
+    assert "application/octet-stream konnte keinem unterstützten" in str(exc_info.value.detail)
 
 
 def test_ocr_forwards_gif_max_frames() -> None:

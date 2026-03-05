@@ -24,6 +24,97 @@ ALLOWED_MIME_TYPES = {
 }
 
 
+def _normalize_content_type(content_type: str | None) -> str | None:
+    if content_type is None:
+        return None
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    return normalized or None
+
+
+def _sniff_content_type(payload: bytes) -> str | None:
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if payload.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if payload.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")):
+        return "image/tiff"
+    if payload.startswith(b"%PDF-"):
+        return "application/pdf"
+    if len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _resolve_effective_content_type(content_type: str | None, payload: bytes) -> str:
+    normalized = _normalize_content_type(content_type)
+    if normalized in ALLOWED_MIME_TYPES:
+        return cast(str, normalized)
+    if normalized in {None, "application/octet-stream"}:
+        sniffed = _sniff_content_type(payload)
+        if sniffed is not None:
+            return sniffed
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "application/octet-stream konnte keinem unterstützten Bild- oder PDF-Typ "
+                "zugeordnet werden."
+            ),
+        )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Nicht unterstützter Datei-Inhaltstyp: {normalized}",
+    )
+
+
+def _query_param(request: Request, name: str) -> str | None:
+    value = request.query_params.get(name)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def _resolve_text_param(form_value: object, query_value: str | None, default: str | None) -> str | None:
+    if isinstance(form_value, str) and form_value != "":
+        return form_value
+    if query_value is not None:
+        return query_value
+    return default
+
+
+def _resolve_int_param(form_value: object, query_value: str | None, field_name: str) -> int | None:
+    if isinstance(form_value, int) and not isinstance(form_value, bool):
+        return form_value
+    if query_value is None:
+        return None
+    try:
+        return int(query_value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ungültiger Integer-Parameter: {field_name}",
+        ) from exc
+
+
+def _resolve_bool_param(
+    form_value: object, query_value: str | None, field_name: str
+) -> bool | None:
+    if isinstance(form_value, bool):
+        return form_value
+    if query_value is None:
+        return None
+    normalized = query_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Ungültiger Boolean-Parameter: {field_name}",
+    )
+
+
 def get_ocr_backend_router(request: Request) -> OCRBackendRouter:
     return cast(OCRBackendRouter, request.app.state.ocr_backend_router)
 
@@ -64,8 +155,8 @@ async def schemas() -> dict:
 @router.post("/ocr")
 async def ocr(
     request: Request,
-    file: UploadFile = File(...),
-    mode: str = Form("plain"),
+    file: UploadFile | None = File(None),
+    mode: str | None = Form(None),
     schema_name: str | None = Form(None),
     model: str | None = Form(None),
     task: str | None = Form(None),
@@ -77,13 +168,30 @@ async def ocr(
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
-    if file.content_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Nicht unterstützter Datei-Inhaltstyp: {file.content_type}",
-        )
 
-    image_bytes = await file.read()
+    mode = cast(str, _resolve_text_param(mode, _query_param(request, "mode"), "plain"))
+    schema_name = _resolve_text_param(schema_name, _query_param(request, "schema_name"), None)
+    model = _resolve_text_param(model, _query_param(request, "model"), None)
+    task = _resolve_text_param(task, _query_param(request, "task"), None)
+    custom_prompt = _resolve_text_param(custom_prompt, _query_param(request, "custom_prompt"), None)
+    token_limit = _resolve_int_param(token_limit, _query_param(request, "token_limit"), "token_limit")
+    gif_max_frames = _resolve_int_param(
+        gif_max_frames, _query_param(request, "gif_max_frames"), "gif_max_frames"
+    )
+    expert_enable_layout = _resolve_bool_param(
+        expert_enable_layout,
+        _query_param(request, "expert_enable_layout"),
+        "expert_enable_layout",
+    )
+    backend = _resolve_text_param(backend, _query_param(request, "backend"), None)
+
+    if file is not None:
+        image_bytes = await file.read()
+        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
+    else:
+        image_bytes = await request.body()
+        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+
     if not image_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -99,7 +207,7 @@ async def ocr(
         result, selected_backend = await pipeline.run(
             backend=backend,
             image_bytes=image_bytes,
-            content_type=file.content_type,
+            content_type=content_type,
             mode=mode,
             schema_name=schema_name,
             model=model,
