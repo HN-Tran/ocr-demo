@@ -33,6 +33,7 @@ export OCR_EXPERT_MODE="selfhosted"
 export OCR_EXPERT_ENABLE_LAYOUT="true"
 export OCR_EXPERT_OCR_API_HOST="localhost"
 export OCR_EXPERT_OCR_API_PORT="11434"
+export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
 export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"
@@ -50,6 +51,27 @@ uv run uvicorn app.main:app --reload
 
 `POST /api/ocr` akzeptiert entweder `multipart/form-data` oder einen rohen Body mit
 `Content-Type: application/octet-stream`.
+
+Zusätzlich gibt es eine Azure-Read-kompatible Oberfläche für das Container-Swagger aus
+`swagger.json`:
+
+- `GET /status`
+- `GET /ready`
+- `GET /ContainerReadiness`
+- `GET /ContainerLiveness`
+- `POST /formrecognizer/documentModels/prebuilt-read:syncAnalyze`
+- `POST /formrecognizer/documentModels/prebuilt-read:analyze`
+- `GET /formrecognizer/documentModels/prebuilt-read/analyzeResults/{resultId}`
+
+Kompatibilitäts-Hinweise:
+
+- `api-version=2022-08-31` ist erforderlich.
+- `application/octet-stream` und `application/json` mit `{"urlSource":"..."}` werden akzeptiert.
+- `:analyze` liefert `202` plus `Operation-Location`; die Verarbeitung läuft im Hintergrund und wird im Analyze-Store für Polling bereitgestellt.
+- Analyze-Ergebnisse werden zusätzlich im Dateisystem unter `ANALYZE_STORE_DIR` persistiert, damit Polling nach einem Prozessneustart auf demselben Volume weiter funktioniert.
+- `pages` und `stringIndexType` werden akzeptiert; `pages` filtert aktuell nur das Antwort-Payload, nicht die eigentliche OCR-Ausführung.
+- `modelId` ist auf `prebuilt-read` begrenzt.
+- `pages`, `paragraphs`, `lines`, `words` und `spans` werden jetzt best-effort aus OCR-Text und Layoutdaten gefüllt. `textElements` bleibt dabei eine pragmatische Annäherung, keine vollständige Grapheme-Cluster-Implementierung.
 
 Multipart-Felder:
 
@@ -95,6 +117,7 @@ Hinweis: Animierte GIFs werden als Mehrseiten-Eingabe behandelt; bis zu 8 Frames
 Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Storyboard aus Sample-Frames in einem Einzelaufruf beschrieben.
 Hinweis: `backend=expert` nutzt GLM-OCR primär für `mode=plain` + `task=ocr_text`; für andere Aufgaben fällt die App auf den Direct-Pfad zurück.
 Hinweis: Expert/Dev läuft in dieser App nur im Self-Hosted-Modus (`OCR_EXPERT_MODE=selfhosted`).
+Hinweis: Bei `backend=expert` kann die Antwort zusätzlich `markdown` enthalten; die UI rendert daraus eine sichere Vorschau, behält aber `text` als Rohausgabe bei.
 
 Response-Format:
 
@@ -132,7 +155,22 @@ Response-Format:
     "languages": []
   },
   "text": "...",
+  "markdown": "# Titel\n\n...",
   "structured": null,
+  "layout": [
+    {
+      "page_number": 1,
+      "regions": [
+        {
+          "index": 0,
+          "label": "text_block",
+          "content": "...",
+          "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+          "confidence": 0.96
+        }
+      ]
+    }
+  ],
   "model": "glm-ocr:latest",
   "backend": "direct",
   "mode": "plain",

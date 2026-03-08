@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import asyncio
+
+from starlette.routing import Mount, Route
+
+from app.config import Settings
+from app.main import _create_ocr_app, create_app
+
+
+def _settings(*, app_base_path: str = "") -> Settings:
+    return Settings(
+        app_name="OCR-Demo",
+        app_base_path=app_base_path,
+        analyze_store_dir="/tmp/ocr-demo-analyze-results-tests",
+        ollama_base_url="http://localhost:11434",
+        ollama_model="glm-ocr:latest",
+        ocr_backend="direct",
+        ocr_expert_mode="selfhosted",
+        ocr_expert_enable_layout=True,
+        ocr_expert_ocr_api_host="localhost",
+        ocr_expert_ocr_api_port=11434,
+        default_token_limit=16384,
+        request_timeout_s=120.0,
+        max_upload_bytes=8 * 1024 * 1024,
+        max_image_dim=2048,
+        host="127.0.0.1",
+        port=8000,
+    )
+
+
+def _route_by_path(routes: list[object], path: str) -> Route:
+    for route in routes:
+        if isinstance(route, Route) and route.path == path:
+            return route
+    raise AssertionError(f"Route '{path}' nicht gefunden")
+
+
+def test_status_endpoint_exists_on_direct_app() -> None:
+    app = _create_ocr_app(settings=_settings())
+    route_paths = {route.path for route in app.routes if hasattr(route, "path")}
+
+    assert "/status" in route_paths
+    assert "/status/" in route_paths
+    assert "/ready" in route_paths
+    assert "/ContainerReadiness" in route_paths
+    assert "/ContainerLiveness" in route_paths
+    assert "/formrecognizer/documentModels/{modelId}:syncAnalyze" in route_paths
+    assert "/formrecognizer/documentModels/{modelId}:analyze" in route_paths
+    assert "/formrecognizer/documentModels/{modelId}/analyzeResults/{rId}" in route_paths
+
+    status_route = _route_by_path(app.routes, "/status")
+    payload = asyncio.run(status_route.endpoint())
+    assert payload["status"] == "ok"
+    assert payload["service"] == "prebuilt-read"
+    assert payload["apiStatus"] == "Healthy"
+
+
+def test_status_endpoint_exists_on_wrapped_app_root_and_mounted_app(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("app.main.get_settings", lambda: _settings(app_base_path="/ocr"))
+    app = create_app()
+
+    root_paths = {route.path for route in app.routes if hasattr(route, "path")}
+    assert "/status" in root_paths
+    assert "/status/" in root_paths
+
+    root_status_route = _route_by_path(app.routes, "/status")
+    root_payload = asyncio.run(root_status_route.endpoint())
+    assert root_payload["status"] == "ok"
+    assert root_payload["service"] == "prebuilt-read"
+
+    mounted_ocr_app = next(
+        route.app for route in app.routes if isinstance(route, Mount) and route.path == "/ocr"
+    )
+    mounted_paths = {route.path for route in mounted_ocr_app.routes if hasattr(route, "path")}
+    assert "/status" in mounted_paths
+    assert "/status/" in mounted_paths
+
+    mounted_status_route = _route_by_path(mounted_ocr_app.routes, "/status")
+    mounted_payload = asyncio.run(mounted_status_route.endpoint())
+    assert mounted_payload["status"] == "ok"
+    assert mounted_payload["service"] == "prebuilt-read"

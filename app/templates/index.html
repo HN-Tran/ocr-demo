@@ -218,15 +218,35 @@
           </div>
         </div>
         <div id="meta">Datei auswählen, um OCR zu starten.</div>
-        <pre id="output"></pre>
-        <section id="table-preview-wrap" class="hidden">
-          <h3>Tabellenvorschau</h3>
-          <div id="table-preview-body"></div>
-        </section>
-        <section id="structured-wrap" class="hidden">
-          <h3>Strukturierte Nutzdaten</h3>
-          <pre id="json-output"></pre>
-        </section>
+        <div id="result-view-switch" class="result-view-switch hidden" role="tablist" aria-label="Ausgabeansicht">
+          <button
+            id="result-view-layout-btn"
+            class="result-view-btn"
+            type="button"
+            data-result-view="layout"
+            aria-pressed="false"
+          >
+            Layout
+          </button>
+          <button
+            id="result-view-markdown-btn"
+            class="result-view-btn"
+            type="button"
+            data-result-view="markdown"
+            aria-pressed="false"
+          >
+            Markdown
+          </button>
+          <button
+            id="result-view-raw-btn"
+            class="result-view-btn"
+            type="button"
+            data-result-view="raw"
+            aria-pressed="false"
+          >
+            Rohtext
+          </button>
+        </div>
         <section id="layout-wrap" class="hidden">
           <div class="layout-head">
             <h3>Layout</h3>
@@ -234,6 +254,22 @@
           </div>
           <div id="layout-visualizations" class="layout-visualizations hidden"></div>
           <div id="layout-pages"></div>
+        </section>
+        <section id="markdown-preview-wrap" class="hidden">
+          <h3>Markdown-Vorschau</h3>
+          <div id="markdown-preview" class="markdown-preview"></div>
+        </section>
+        <section id="raw-wrap" class="hidden">
+          <h3>Rohtext</h3>
+          <pre id="output"></pre>
+          <section id="table-preview-wrap" class="hidden">
+            <h3>Tabellenvorschau</h3>
+            <div id="table-preview-body"></div>
+          </section>
+        </section>
+        <section id="structured-wrap" class="hidden">
+          <h3>Strukturierte Nutzdaten</h3>
+          <pre id="json-output"></pre>
         </section>
         <div id="loading-overlay" class="loading-overlay" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>

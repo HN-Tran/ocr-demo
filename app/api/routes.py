@@ -1,19 +1,40 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import cast
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+import httpx
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import JSONResponse, Response
 
 from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
+from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.ollama_client import OllamaClient, OllamaError
 
 router = APIRouter(prefix="/api")
+compat_router = APIRouter()
 API_VERSION = "2026-03-09-preview"
 STRING_INDEX_TYPE = "textElements"
+AZURE_API_VERSION = "2022-08-31"
+AZURE_MODEL_ID = "prebuilt-read"
+SUPPORTED_STRING_INDEX_TYPES = {"textElements", "unicodeCodePoint", "utf16CodeUnit"}
 ALLOWED_MIME_TYPES = {
     "image/png",
     "image/jpeg",
@@ -24,6 +45,7 @@ ALLOWED_MIME_TYPES = {
     "image/x-tiff",
     "application/pdf",
 }
+_WORD_RE = re.compile(r"\S+")
 
 
 def _isoformat_utc(value: datetime) -> str:
@@ -185,74 +207,274 @@ def _page_content_from_layout(page: object) -> str:
     return "\n".join(page_content).strip()
 
 
-def _build_paragraphs(
-    layout: list[dict[str, object]] | None,
-    page_texts: list[str] | None,
-    content: str,
+def _string_unit_length(text: str, string_index_type: str) -> int:
+    if string_index_type == "utf16CodeUnit":
+        return len(text.encode("utf-16-le")) // 2
+    return len(text)
+
+
+def _make_span(*, offset: int, text: str, string_index_type: str) -> dict[str, int]:
+    return {
+        "offset": offset,
+        "length": _string_unit_length(text, string_index_type),
+    }
+
+
+def _locate_span_in_page_content(
+    *,
+    page_content: str,
+    fragment: str,
+    page_offset: int,
+    string_index_type: str,
+    search_cursor: int,
+) -> tuple[dict[str, int], int]:
+    if not fragment:
+        return {"offset": page_offset, "length": 0}, search_cursor
+
+    position = page_content.find(fragment, search_cursor)
+    if position < 0:
+        position = page_content.find(fragment)
+    if position < 0:
+        position = min(search_cursor, len(page_content))
+
+    return (
+        _make_span(
+            offset=page_offset + _string_unit_length(page_content[:position], string_index_type),
+            text=fragment,
+            string_index_type=string_index_type,
+        ),
+        position + len(fragment),
+    )
+
+
+def _build_line_and_word_entries(
+    *,
+    page_content: str,
+    page_offset: int,
+    page_layout: object,
+    string_index_type: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    lines: list[dict[str, object]] = []
+    words: list[dict[str, object]] = []
+    search_cursor = 0
+
+    regions = page_layout.get("regions") if isinstance(page_layout, dict) else None
+    if isinstance(regions, list) and regions:
+        for region in regions:
+            if not isinstance(region, dict):
+                continue
+            region_content = str(region.get("content") or "").strip()
+            if not region_content:
+                continue
+            polygon = _bbox_to_polygon(region.get("bbox_2d"))
+            for segment in [line.strip() for line in region_content.splitlines() if line.strip()] or [region_content]:
+                line_span, search_cursor = _locate_span_in_page_content(
+                    page_content=page_content,
+                    fragment=segment,
+                    page_offset=page_offset,
+                    string_index_type=string_index_type,
+                    search_cursor=search_cursor,
+                )
+                line_entry: dict[str, object] = {"content": segment, "spans": [line_span]}
+                if polygon is not None:
+                    line_entry["polygon"] = polygon
+                lines.append(line_entry)
+                for word_match in _WORD_RE.finditer(segment):
+                    word_content = word_match.group(0)
+                    words.append(
+                        {
+                            "content": word_content,
+                            "span": _make_span(
+                                offset=line_span["offset"]
+                                + _string_unit_length(
+                                    segment[: word_match.start()], string_index_type
+                                ),
+                                text=word_content,
+                                string_index_type=string_index_type,
+                            ),
+                        }
+                    )
+        return lines, words
+
+    for segment in [line.strip() for line in page_content.splitlines() if line.strip()]:
+        line_span, search_cursor = _locate_span_in_page_content(
+            page_content=page_content,
+            fragment=segment,
+            page_offset=page_offset,
+            string_index_type=string_index_type,
+            search_cursor=search_cursor,
+        )
+        lines.append({"content": segment, "spans": [line_span]})
+        for word_match in _WORD_RE.finditer(segment):
+            word_content = word_match.group(0)
+            words.append(
+                {
+                    "content": word_content,
+                    "span": _make_span(
+                        offset=line_span["offset"]
+                        + _string_unit_length(segment[: word_match.start()], string_index_type),
+                        text=word_content,
+                        string_index_type=string_index_type,
+                    ),
+                }
+            )
+    return lines, words
+
+
+def _build_paragraph_entries_for_page(
+    *,
+    page_number: int,
+    page_content: str,
+    page_offset: int,
+    page_layout: object,
+    string_index_type: str,
 ) -> list[dict[str, object]]:
     paragraphs: list[dict[str, object]] = []
-    if layout:
-        for page_index, page in enumerate(layout, start=1):
-            page_number = _page_number(page.get("page_number"), page_index)
-            regions = page.get("regions")
-            if not isinstance(regions, list):
+    search_cursor = 0
+
+    regions = page_layout.get("regions") if isinstance(page_layout, dict) else None
+    if isinstance(regions, list) and regions:
+        for region in regions:
+            if not isinstance(region, dict):
                 continue
-            for region in regions:
-                if not isinstance(region, dict):
-                    continue
-                region_content = str(region.get("content") or "").strip()
-                if not region_content:
-                    continue
-                paragraph: dict[str, object] = {"content": region_content, "spans": []}
-                polygon = _bbox_to_polygon(region.get("bbox_2d"))
-                if polygon is not None:
-                    paragraph["boundingRegions"] = [
-                        {
-                            "pageNumber": page_number,
-                            "polygon": polygon,
-                        }
-                    ]
-                paragraphs.append(paragraph)
-    if paragraphs:
+            region_content = str(region.get("content") or "").strip()
+            if not region_content:
+                continue
+            paragraph_span, search_cursor = _locate_span_in_page_content(
+                page_content=page_content,
+                fragment=region_content,
+                page_offset=page_offset,
+                string_index_type=string_index_type,
+                search_cursor=search_cursor,
+            )
+            paragraph: dict[str, object] = {"content": region_content, "spans": [paragraph_span]}
+            polygon = _bbox_to_polygon(region.get("bbox_2d"))
+            if polygon is not None:
+                paragraph["boundingRegions"] = [
+                    {
+                        "pageNumber": page_number,
+                        "polygon": polygon,
+                    }
+                ]
+            paragraphs.append(paragraph)
         return paragraphs
 
-    for page_text in page_texts or []:
-        for paragraph_text in _split_page_paragraphs(page_text):
-            paragraphs.append({"content": paragraph_text, "spans": []})
+    for paragraph_text in _split_page_paragraphs(page_content):
+        paragraph_span, search_cursor = _locate_span_in_page_content(
+            page_content=page_content,
+            fragment=paragraph_text,
+            page_offset=page_offset,
+            string_index_type=string_index_type,
+            search_cursor=search_cursor,
+        )
+        paragraphs.append({"content": paragraph_text, "spans": [paragraph_span]})
+    return paragraphs
 
-    if paragraphs or not content.strip():
-        return paragraphs
-    return [{"content": content.strip(), "spans": []}]
 
-
-def _build_pages(
+def _build_document_projection(
+    *,
     page_infos: list[dict[str, object]] | None,
     page_texts: list[str] | None,
     layout: list[dict[str, object]] | None,
     content: str,
-) -> list[dict[str, object]]:
+    string_index_type: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     page_count = max(len(page_infos or []), len(page_texts or []), len(layout or []))
     if page_count == 0:
         if not content.strip():
-            return []
-        page_entry = _page_entry_base({}, 1)
-        page_entry["content"] = content.strip()
-        return [page_entry]
+            return [], []
+        return (
+            [
+                {
+                    **_page_entry_base({}, 1),
+                    "content": content.strip(),
+                    "spans": [_make_span(offset=0, text=content.strip(), string_index_type=string_index_type)],
+                    "lines": [],
+                    "words": [],
+                }
+            ],
+            [{"content": content.strip(), "spans": [_make_span(offset=0, text=content.strip(), string_index_type=string_index_type)]}],
+        )
 
-    pages: list[dict[str, object]] = []
+    page_contexts: list[dict[str, object]] = []
     for page_index in range(1, page_count + 1):
         page_info = (page_infos or [])[page_index - 1] if page_index - 1 < len(page_infos or []) else {}
         page_layout = (layout or [])[page_index - 1] if page_index - 1 < len(layout or []) else None
-        page_text = (
+        raw_page_text = (
             (page_texts or [])[page_index - 1]
             if page_index - 1 < len(page_texts or [])
             else _page_content_from_layout(page_layout)
         )
+        page_text = str(raw_page_text or "").strip()
+        page_number = _page_number(
+            page_info.get("page_number") if isinstance(page_info, dict) else None,
+            page_index,
+        )
+        page_contexts.append(
+            {
+                "page_index": page_index,
+                "page_number": page_number,
+                "page_info": page_info,
+                "page_layout": page_layout,
+                "page_content": page_text,
+            }
+        )
+
+    offsets: list[int] = []
+    current_offset = 0
+    has_previous_content = False
+    for page_context in page_contexts:
+        page_content = str(page_context["page_content"])
+        if page_content and has_previous_content:
+            current_offset += _string_unit_length("\n\n", string_index_type)
+        offsets.append(current_offset)
+        if page_content:
+            current_offset += _string_unit_length(page_content, string_index_type)
+            has_previous_content = True
+
+    pages: list[dict[str, object]] = []
+    paragraphs: list[dict[str, object]] = []
+    for page_context, page_offset in zip(page_contexts, offsets, strict=False):
+        page_index = cast(int, page_context["page_index"])
+        page_number = cast(int, page_context["page_number"])
+        page_info = page_context["page_info"]
+        page_layout = page_context["page_layout"]
+        page_content = cast(str, page_context["page_content"])
+
         page_entry = _page_entry_base(page_info, page_index)
-        if page_text.strip():
-            page_entry["content"] = page_text.strip()
+        if page_content:
+            page_entry["content"] = page_content
+            page_entry["spans"] = [
+                _make_span(
+                    offset=page_offset,
+                    text=page_content,
+                    string_index_type=string_index_type,
+                )
+            ]
+            lines, words = _build_line_and_word_entries(
+                page_content=page_content,
+                page_offset=page_offset,
+                page_layout=page_layout,
+                string_index_type=string_index_type,
+            )
+            page_entry["lines"] = lines
+            page_entry["words"] = words
+            paragraphs.extend(
+                _build_paragraph_entries_for_page(
+                    page_number=page_number,
+                    page_content=page_content,
+                    page_offset=page_offset,
+                    page_layout=page_layout,
+                    string_index_type=string_index_type,
+                )
+            )
+        else:
+            page_entry["lines"] = []
+            page_entry["words"] = []
+            page_entry["spans"] = []
         pages.append(page_entry)
-    return pages
+
+    return pages, paragraphs
 
 
 def _build_analyze_result(
@@ -262,13 +484,20 @@ def _build_analyze_result(
     layout: list[dict[str, object]] | None,
     page_infos: list[dict[str, object]] | None,
     page_texts: list[str] | None,
+    api_version: str = API_VERSION,
+    string_index_type: str = STRING_INDEX_TYPE,
 ) -> dict[str, object]:
-    paragraphs = _build_paragraphs(layout, page_texts, content)
-    pages = _build_pages(page_infos, page_texts, layout, content)
+    pages, paragraphs = _build_document_projection(
+        page_infos=page_infos,
+        page_texts=page_texts,
+        layout=layout,
+        content=content,
+        string_index_type=string_index_type,
+    )
     return {
-        "apiVersion": API_VERSION,
+        "apiVersion": api_version,
         "modelId": model_id,
-        "stringIndexType": STRING_INDEX_TYPE,
+        "stringIndexType": string_index_type,
         "content": content,
         "pages": pages,
         "paragraphs": paragraphs,
@@ -283,6 +512,334 @@ def get_ocr_backend_router(request: Request) -> OCRBackendRouter:
 
 def get_ollama_client(request: Request) -> OllamaClient:
     return cast(OllamaClient, request.app.state.ollama_client)
+
+
+def get_analyze_operation_store(request: Request) -> AnalyzeOperationStore:
+    return cast(AnalyzeOperationStore, request.app.state.analyze_operation_store)
+
+
+def _service_status_payload() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "prebuilt-read",
+        "apiStatus": "Healthy",
+        "apiStatusMessage": "Service is running.",
+    }
+
+
+def _usage_logs_payload() -> dict[str, object]:
+    return {
+        "apiType": "prebuilt-read",
+        "serviceName": "ocr-demo",
+        "type": "UsageLogs",
+        "meters": [],
+    }
+
+
+def _validate_azure_model_id(model_id: str) -> str:
+    if model_id != AZURE_MODEL_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unbekanntes Modell: {model_id}",
+        )
+    return model_id
+
+
+def _validate_azure_api_version(api_version: str) -> str:
+    if api_version != AZURE_API_VERSION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Nicht unterstützte api-version: {api_version}",
+        )
+    return api_version
+
+
+def _normalize_string_index_type(string_index_type: str | None) -> str:
+    if string_index_type is None:
+        return "textElements"
+    if string_index_type not in SUPPORTED_STRING_INDEX_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Nicht unterstützter stringIndexType: {string_index_type}",
+        )
+    return string_index_type
+
+
+def _parse_pages_spec(pages: str | None) -> set[int] | None:
+    if pages is None or not pages.strip():
+        return None
+
+    selected_pages: set[int] = set()
+    for part in pages.split(","):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            start_text, end_text = chunk.split("-", 1)
+            try:
+                start_page = int(start_text)
+                end_page = int(end_text)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ungültiger Seitenbereich: {chunk}",
+                ) from exc
+            if start_page < 1 or end_page < start_page:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ungültiger Seitenbereich: {chunk}",
+                )
+            selected_pages.update(range(start_page, end_page + 1))
+            continue
+        try:
+            page_number = int(chunk)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ungültige Seitenauswahl: {chunk}",
+            ) from exc
+        if page_number < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ungültige Seitenauswahl: {chunk}",
+            )
+        selected_pages.add(page_number)
+    return selected_pages or None
+
+
+def _filter_result_pages(
+    *,
+    selected_pages: set[int] | None,
+    layout: list[dict[str, object]] | None,
+    page_infos: list[dict[str, object]] | None,
+    page_texts: list[str] | None,
+) -> tuple[list[dict[str, object]] | None, list[dict[str, object]] | None, list[str] | None]:
+    if not selected_pages:
+        return layout, page_infos, page_texts
+
+    filtered_layout = None
+    if layout is not None:
+        filtered_layout = [
+            page
+            for index, page in enumerate(layout, start=1)
+            if _page_number(page.get("page_number") if isinstance(page, dict) else None, index)
+            in selected_pages
+        ]
+
+    filtered_page_infos = None
+    if page_infos is not None:
+        filtered_page_infos = [
+            page_info
+            for index, page_info in enumerate(page_infos, start=1)
+            if _page_number(page_info.get("page_number") if isinstance(page_info, dict) else None, index)
+            in selected_pages
+        ]
+
+    filtered_page_texts = None
+    if page_texts is not None:
+        filtered_page_texts = [
+            page_text
+            for index, page_text in enumerate(page_texts, start=1)
+            if index in selected_pages
+        ]
+
+    return filtered_layout, filtered_page_infos, filtered_page_texts
+
+
+def _content_from_page_texts_or_layout(
+    page_texts: list[str] | None,
+    layout: list[dict[str, object]] | None,
+    fallback_text: str,
+) -> str:
+    if page_texts:
+        normalized_pages = [page_text.strip() for page_text in page_texts if page_text.strip()]
+        if normalized_pages:
+            return "\n\n".join(normalized_pages)
+    if layout:
+        page_contents = [_page_content_from_layout(page) for page in layout]
+        normalized_pages = [page_content for page_content in page_contents if page_content]
+        if normalized_pages:
+            return "\n\n".join(normalized_pages)
+    return fallback_text
+
+
+async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
+    settings = get_settings()
+    normalized_content_type = _normalize_content_type(request.headers.get("content-type"))
+
+    if normalized_content_type == "application/json":
+        raw_body = await request.body()
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ungültiger JSON-Body für Analyze-Anfrage.",
+            ) from exc
+        url_source = payload.get("urlSource")
+        if not isinstance(url_source, str) or not url_source.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="application/json erfordert das Feld 'urlSource'.",
+            )
+        async with httpx.AsyncClient(timeout=settings.request_timeout_s) as client:
+            try:
+                response = await client.get(url_source.strip())
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"urlSource konnte nicht geladen werden: {exc}",
+                ) from exc
+        image_bytes = response.content
+        content_type = _resolve_effective_content_type(response.headers.get("content-type"), image_bytes)
+    else:
+        image_bytes = await request.body()
+        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Die hochgeladene Datei ist leer.",
+        )
+    if len(image_bytes) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Datei überschreitet {settings.max_upload_bytes} Bytes.",
+        )
+    return image_bytes, content_type
+
+
+async def _run_plain_ocr(
+    *,
+    pipeline: OCRBackendRouter,
+    image_bytes: bytes,
+    content_type: str,
+) -> tuple[object, str]:
+    try:
+        return await pipeline.run(
+            backend=None,
+            image_bytes=image_bytes,
+            content_type=content_type,
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task="ocr_text",
+            custom_prompt=None,
+            token_limit=None,
+            gif_max_frames=None,
+            expert_enable_layout=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except OllamaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+
+
+async def _execute_compat_analyze_operation(
+    *,
+    request: Request,
+    store: AnalyzeOperationStore,
+    operation_id: str,
+    started_at: datetime,
+    model_id: str,
+    string_index_type: str,
+    selected_pages: set[int] | None,
+    pipeline: OCRBackendRouter,
+    image_bytes: bytes,
+    content_type: str,
+) -> None:
+    try:
+        await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
+        result, _ = await _run_plain_ocr(
+            pipeline=pipeline,
+            image_bytes=image_bytes,
+            content_type=content_type,
+        )
+        completed_at = datetime.now(timezone.utc)
+        payload = _build_compat_response_payload(
+            started_at=started_at,
+            completed_at=completed_at,
+            model_id=model_id,
+            string_index_type=string_index_type,
+            selected_pages=selected_pages,
+            result=result,
+        )
+        await store.mark_succeeded(operation_id, payload=payload, completed_at=completed_at)
+    except HTTPException as exc:
+        failed_at = datetime.now(timezone.utc)
+        await store.mark_failed(
+            operation_id,
+            code="AnalyzeFailed",
+            message=str(exc.detail),
+            failed_at=failed_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        failed_at = datetime.now(timezone.utc)
+        logger = cast(logging.Logger, request.app.state.logger)
+        logger.exception("Unerwarteter OCR-Fehler in compat_analyze")
+        await store.mark_failed(
+            operation_id,
+            code="InternalServerError",
+            message=str(exc),
+            failed_at=failed_at,
+        )
+
+
+def _build_compat_response_payload(
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    model_id: str,
+    string_index_type: str,
+    selected_pages: set[int] | None,
+    result: object,
+) -> dict[str, object]:
+    layout = getattr(result, "layout", None)
+    page_infos = getattr(result, "page_infos", None)
+    page_texts = getattr(result, "page_texts", None)
+    filtered_layout, filtered_page_infos, filtered_page_texts = _filter_result_pages(
+        selected_pages=selected_pages,
+        layout=layout,
+        page_infos=page_infos,
+        page_texts=page_texts,
+    )
+    content = _content_from_page_texts_or_layout(filtered_page_texts, filtered_layout, getattr(result, "text", ""))
+    return {
+        "status": "succeeded",
+        "createdDateTime": _isoformat_utc(started_at),
+        "lastUpdatedDateTime": _isoformat_utc(completed_at),
+        "analyzeResult": _build_analyze_result(
+            content=content,
+            model_id=model_id,
+            layout=filtered_layout,
+            page_infos=filtered_page_infos,
+            page_texts=filtered_page_texts,
+            api_version=AZURE_API_VERSION,
+            string_index_type=string_index_type,
+        ),
+    }
+
+
+def _operation_location(request: Request, *, model_id: str, result_id: str, api_version: str) -> str:
+    base_location = str(
+        request.url_for(
+            "compat_get_analyze_result",
+            modelId=model_id,
+            rId=result_id,
+        )
+    )
+    separator = "&" if "?" in base_location else "?"
+    return f"{base_location}{separator}api-version={api_version}"
+
+
+def _compat_headers(*, request_id: str | None = None, retry_after: str | None = None) -> dict[str, str]:
+    headers = {"apim-request-id": request_id or str(uuid4())}
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return headers
 
 
 @router.get("/health")
@@ -410,6 +967,7 @@ async def ocr(
         "lastUpdatedDateTime": _isoformat_utc(completed_at),
         "analyzeResult": analyze_result,
         "text": result.text,
+        "markdown": result.markdown,
         "structured": result.structured,
         "layout": result.layout,
         "layout_visualizations": result.layout_visualizations,
@@ -420,6 +978,154 @@ async def ocr(
         "latency_ms": result.latency_ms,
         "warnings": result.warnings,
     }
+
+
+@compat_router.get("/ready")
+@compat_router.get("/ContainerReadiness")
+@compat_router.get("/ContainerLiveness")
+async def compat_service_ready() -> JSONResponse:
+    return JSONResponse(_service_status_payload(), headers=_compat_headers())
+
+
+@compat_router.post("/authentication/renew")
+async def compat_authentication_renew(token: str | None = None) -> JSONResponse:
+    return JSONResponse({"status": "ok", "token": token}, headers=_compat_headers())
+
+
+@compat_router.get("/records/usage-logs")
+@compat_router.get("/records/usage-logs/{month}/{year}")
+async def compat_usage_logs(month: str | None = None, year: str | None = None) -> JSONResponse:
+    payload = _usage_logs_payload()
+    if month is not None and year is not None:
+        payload["month"] = month
+        payload["year"] = year
+    return JSONResponse(payload, headers=_compat_headers())
+
+
+@compat_router.post("/formrecognizer/documentModels/{modelId}:syncAnalyze")
+async def compat_sync_analyze(
+    request: Request,
+    modelId: str,
+    api_version: str = Query(..., alias="api-version"),
+    pages: str | None = Query(None),
+    locale: str | None = Query(None),
+    string_index_type: str | None = Query(None, alias="stringIndexType"),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
+) -> JSONResponse:
+    del locale
+    model_id = _validate_azure_model_id(modelId)
+    _validate_azure_api_version(api_version)
+    normalized_string_index_type = _normalize_string_index_type(string_index_type)
+    selected_pages = _parse_pages_spec(pages)
+
+    started_at = datetime.now(timezone.utc)
+    image_bytes, content_type = await _resolve_compat_request_input(request)
+    result, _ = await _run_plain_ocr(
+        pipeline=pipeline,
+        image_bytes=image_bytes,
+        content_type=content_type,
+    )
+    completed_at = datetime.now(timezone.utc)
+    return JSONResponse(
+        _build_compat_response_payload(
+            started_at=started_at,
+            completed_at=completed_at,
+            model_id=model_id,
+            string_index_type=normalized_string_index_type,
+            selected_pages=selected_pages,
+            result=result,
+        ),
+        headers=_compat_headers(),
+    )
+
+
+@compat_router.post("/formrecognizer/documentModels/{modelId}:analyze")
+async def compat_analyze(
+    request: Request,
+    modelId: str,
+    api_version: str = Query(..., alias="api-version"),
+    pages: str | None = Query(None),
+    locale: str | None = Query(None),
+    string_index_type: str | None = Query(None, alias="stringIndexType"),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
+    store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
+) -> Response:
+    del locale
+    model_id = _validate_azure_model_id(modelId)
+    _validate_azure_api_version(api_version)
+    normalized_string_index_type = _normalize_string_index_type(string_index_type)
+    selected_pages = _parse_pages_spec(pages)
+
+    started_at = datetime.now(timezone.utc)
+    image_bytes, content_type = await _resolve_compat_request_input(request)
+    operation = await store.create(model_id=model_id, created_at=started_at)
+    asyncio.create_task(
+        _execute_compat_analyze_operation(
+            request=request,
+            store=store,
+            operation_id=operation.id,
+            started_at=started_at,
+            model_id=model_id,
+            string_index_type=normalized_string_index_type,
+            selected_pages=selected_pages,
+            pipeline=pipeline,
+            image_bytes=image_bytes,
+            content_type=content_type,
+        )
+    )
+
+    return Response(
+        status_code=status.HTTP_202_ACCEPTED,
+        headers={
+            "Operation-Location": _operation_location(
+                request,
+                model_id=model_id,
+                result_id=operation.id,
+                api_version=api_version,
+            ),
+            **_compat_headers(request_id=operation.request_id, retry_after="1"),
+        },
+    )
+
+
+@compat_router.get(
+    "/formrecognizer/documentModels/{modelId}/analyzeResults/{rId}",
+    name="compat_get_analyze_result",
+)
+async def compat_get_analyze_result(
+    modelId: str,
+    rId: str,
+    api_version: str = Query(..., alias="api-version"),
+    store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
+) -> JSONResponse:
+    model_id = _validate_azure_model_id(modelId)
+    _validate_azure_api_version(api_version)
+
+    operation = await store.get(rId)
+    if operation is None or operation.model_id != model_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Analyze-Ergebnis nicht gefunden: {rId}",
+        )
+
+    if operation.status == "succeeded" and operation.payload is not None:
+        return JSONResponse(
+            operation.payload,
+            headers=_compat_headers(request_id=operation.request_id),
+        )
+
+    response_payload: dict[str, object] = {
+        "status": operation.status,
+        "createdDateTime": _isoformat_utc(operation.created_at),
+        "lastUpdatedDateTime": _isoformat_utc(operation.updated_at),
+    }
+    if operation.error is not None:
+        response_payload["error"] = operation.error
+    retry_after = None if operation.status in {"succeeded", "failed"} else "1"
+    return JSONResponse(
+        response_payload,
+        headers=_compat_headers(request_id=operation.request_id, retry_after=retry_after),
+    )
 
 
 # Backward-compatible alias paths for external clients.
@@ -436,3 +1142,17 @@ router.add_api_route("/v1/health/", health, methods=["GET"], include_in_schema=F
 router.add_api_route("/v1/models/", models, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/schemas/", schemas, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/ocr/", ocr, methods=["POST"], include_in_schema=False)
+
+compat_router.add_api_route("/ready/", compat_service_ready, methods=["GET"], include_in_schema=False)
+compat_router.add_api_route(
+    "/ContainerReadiness/",
+    compat_service_ready,
+    methods=["GET"],
+    include_in_schema=False,
+)
+compat_router.add_api_route(
+    "/ContainerLiveness/",
+    compat_service_ready,
+    methods=["GET"],
+    include_in_schema=False,
+)

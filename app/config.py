@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -39,6 +40,7 @@ def _env_bool(key: str, default: bool) -> bool:
 class Settings:
     app_name: str
     app_base_path: str
+    analyze_store_dir: str
     ollama_base_url: str
     ollama_model: str
     ocr_backend: str
@@ -81,6 +83,9 @@ def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "OCR-Demo"),
         app_base_path=os.getenv("APP_BASE_PATH", ""),
+        analyze_store_dir=str(
+            Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/ocr-demo-analyze-results"))
+        ),
         ollama_base_url=ollama_base_url,
         ollama_model=os.getenv("OLLAMA_MODEL", "glm-ocr:latest"),
         ocr_backend=ocr_backend,

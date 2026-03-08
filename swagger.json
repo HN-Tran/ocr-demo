@@ -1,0 +1,471 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Form Recognizer: prebuilt-read",
+    "description": "Form Recognizer extracts information from forms and images into structured data.",
+    "version": "2022-08-31"
+  },
+  "paths": {
+    "/authentication/renew": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/ContainerLiveness": {
+      "get": {
+        "tags": [
+          "HealthCheck"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is healthy."
+          },
+          "503": {
+            "description": "Service is unhealthy."
+          }
+        }
+      }
+    },
+    "/ContainerReadiness": {
+      "get": {
+        "tags": [
+          "HealthCheck"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is ready."
+          },
+          "503": {
+            "description": "Service is not ready to serve request."
+          }
+        }
+      }
+    },
+    "/formrecognizer/documentModels/{modelId}:analyze": {
+      "post": {
+        "tags": [
+          "Analyze"
+        ],
+        "summary": "Analyzes document with model.",
+        "description": "See https://westus2.dev.cognitive.microsoft.com/docs/services/form-recognizer-api-2022-08-31 for detailed information.",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "description": "Unique model name.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "prebuilt-read"
+              ],
+              "type": "string",
+              "default": "prebuilt-read"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "description": "Requested API version.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "2022-08-31"
+              ],
+              "type": "string",
+              "default": "2022-08-31"
+            }
+          },
+          {
+            "name": "pages",
+            "in": "query",
+            "description": "List of 1-based page numbers to analyze. Ex. \"1-3,5,7-9\""
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "description": "Locale hint for text recognition and document analysis. Value may contain only the language code (ex. \"en\", \"fr\") or BCP 47 language tag (ex. \"en-US\")."
+          },
+          {
+            "name": "stringIndexType",
+            "in": "query",
+            "description": "Method used to compute string offset and length. Will default to textElements if not specified",
+            "schema": {
+              "enum": [
+                "textElements",
+                "unicodeCodePoint",
+                "utf16CodeUnit"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urlSource": {
+                    "type": "file",
+                    "description": "image URL",
+                    "format": "url",
+                    "example": "http://example.com/images/test.jpg"
+                  }
+                }
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "raw image binary",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Request is queued successfully."
+          }
+        }
+      }
+    },
+    "/formrecognizer/documentModels/{modelId}/analyzeResults/{rId}": {
+      "get": {
+        "tags": [
+          "Analyze"
+        ],
+        "summary": "Gets the result of document analysis.",
+        "description": "See https://westus2.dev.cognitive.microsoft.com/docs/services/form-recognizer-api-2022-08-31 for response format and detailed information.",
+        "parameters": [
+          {
+            "name": "rId",
+            "in": "path",
+            "description": "Analyze operation result ID, contained in the Analyze operation's 'Operation-Location' response header.",
+            "required": true
+          },
+          {
+            "name": "modelId",
+            "in": "path",
+            "description": "Unique model name.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "prebuilt-read"
+              ],
+              "type": "string",
+              "default": "prebuilt-read"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "description": "Requested API version.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "2022-08-31"
+              ],
+              "type": "string",
+              "default": "2022-08-31"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/formrecognizer/documentModels/{modelId}:syncAnalyze": {
+      "post": {
+        "tags": [
+          "Analyze"
+        ],
+        "summary": "Analyze document synchronously",
+        "description": "See https://westus2.dev.cognitive.microsoft.com/docs/services/form-recognizer-api-2022-08-31 for detailed information.",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "description": "Unique model name.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "prebuilt-read"
+              ],
+              "type": "string",
+              "default": "prebuilt-read"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "description": "Requested API version.",
+            "required": true,
+            "schema": {
+              "enum": [
+                "2022-08-31"
+              ],
+              "type": "string",
+              "default": "2022-08-31"
+            }
+          },
+          {
+            "name": "pages",
+            "in": "query",
+            "description": "List of 1-based page numbers to analyze. Ex. \"1-3,5,7-9\""
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "description": "Locale hint for text recognition and document analysis. Value may contain only the language code (ex. \"en\", \"fr\") or BCP 47 language tag (ex. \"en-US\")."
+          },
+          {
+            "name": "stringIndexType",
+            "in": "query",
+            "description": "Method used to compute string offset and length. Will default to textElements if not specified",
+            "schema": {
+              "enum": [
+                "textElements",
+                "unicodeCodePoint",
+                "utf16CodeUnit"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urlSource": {
+                    "type": "file",
+                    "description": "image URL",
+                    "format": "url",
+                    "example": "http://example.com/images/test.jpg"
+                  }
+                }
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "raw image binary",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Ready"
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response results in a ready response (200)."
+          },
+          "503": {
+            "description": "A failed response results in an unready response (503)."
+          }
+        }
+      }
+    },
+    "/records/usage-logs": {
+      "get": {
+        "tags": [
+          "DisconnectedUsage"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommerceUsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommerceUsageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/records/usage-logs/{month}/{year}": {
+      "get": {
+        "tags": [
+          "DisconnectedUsage"
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "year",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommerceUsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommerceUsageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CommerceUsageResponse": {
+        "type": "object",
+        "properties": {
+          "apiType": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceName": {
+            "type": "string",
+            "nullable": true
+          },
+          "type": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          },
+          "meters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommitmentTierBillingMeter"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommitmentTierBillingMeter": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "billedUnit": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServiceStatus": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "nullable": true
+          },
+          "apiStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "apiStatusMessage": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Analyze"
+    }
+  ]
+}

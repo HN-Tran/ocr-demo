@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import importlib
 import mimetypes
 import time
@@ -77,7 +78,7 @@ class GLMOCRExpertPipeline:
         parser_class = self._load_glmocr_class()
 
         try:
-            return parser_class(
+            parser = parser_class(
                 mode=self.mode,
                 model=model,
                 ocr_api_host=self.ocr_api_host,
@@ -85,6 +86,8 @@ class GLMOCRExpertPipeline:
                 timeout=max(1, int(self.timeout_s)),
                 enable_layout=enable_layout,
             )
+            self._enable_layout_score_preservation(parser)
+            return parser
         except Exception as exc:  # noqa: BLE001
             raise OllamaError(f"Expert-Backend konnte nicht initialisiert werden: {exc}") from exc
 
@@ -119,6 +122,151 @@ class GLMOCRExpertPipeline:
         return None
 
     @staticmethod
+    def _coerce_confidence(value: Any) -> float | None:
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric_value < 0:
+            return None
+        return numeric_value
+
+    @staticmethod
+    def _region_signature(region: dict[str, object]) -> tuple[object, ...]:
+        bbox = region.get("bbox_2d")
+        if isinstance(bbox, list) and len(bbox) == 4:
+            bbox_value: tuple[object, ...] = tuple(
+                round(float(value), 4) if isinstance(value, (int, float)) else value for value in bbox
+            )
+        else:
+            bbox_value = ()
+
+        return (
+            region.get("index"),
+            str(region.get("label") or "").strip(),
+            str(region.get("content") or "").strip(),
+            bbox_value,
+        )
+
+    @classmethod
+    def _extract_page_region_scores(
+        cls, raw_layout: Any
+    ) -> list[list[tuple[tuple[object, ...], float | None]]]:
+        if isinstance(raw_layout, dict):
+            raw_pages = raw_layout.get("pages") or raw_layout.get("layout")
+        else:
+            raw_pages = raw_layout
+        if raw_pages is None:
+            return []
+        if not isinstance(raw_pages, list):
+            return []
+
+        page_scores: list[list[tuple[tuple[object, ...], float | None]]] = []
+        for raw_page in raw_pages:
+            if isinstance(raw_page, dict):
+                raw_regions = raw_page.get("regions")
+            else:
+                raw_regions = raw_page
+            if not isinstance(raw_regions, list):
+                page_scores.append([])
+                continue
+
+            region_scores: list[tuple[tuple[object, ...], float | None]] = []
+            for raw_region in raw_regions:
+                if not isinstance(raw_region, dict):
+                    continue
+                region_scores.append(
+                    (
+                        cls._region_signature(raw_region),
+                        cls._coerce_confidence(raw_region.get("score") or raw_region.get("confidence")),
+                    )
+                )
+            page_scores.append(region_scores)
+        return page_scores
+
+    @classmethod
+    def _merge_region_scores(
+        cls,
+        formatted_layout: Any,
+        page_scores: list[list[tuple[tuple[object, ...], float | None]]],
+    ) -> Any:
+        if isinstance(formatted_layout, dict):
+            formatted_pages = formatted_layout.get("pages") or formatted_layout.get("layout")
+        else:
+            formatted_pages = formatted_layout
+        if formatted_pages is None:
+            return formatted_layout
+        if not isinstance(formatted_pages, list):
+            return formatted_layout
+
+        for page_index, formatted_page in enumerate(formatted_pages):
+            if not isinstance(formatted_page, dict):
+                continue
+            formatted_regions = formatted_page.get("regions")
+            if not isinstance(formatted_regions, list):
+                continue
+
+            candidate_scores = page_scores[page_index] if page_index < len(page_scores) else []
+            scores_by_signature = {
+                signature: confidence
+                for signature, confidence in candidate_scores
+                if confidence is not None
+            }
+            positional_scores = [confidence for _, confidence in candidate_scores]
+
+            for region_index, formatted_region in enumerate(formatted_regions):
+                if not isinstance(formatted_region, dict):
+                    continue
+                if formatted_region.get("score") is not None or formatted_region.get("confidence") is not None:
+                    continue
+
+                confidence = scores_by_signature.get(cls._region_signature(formatted_region))
+                if confidence is None and region_index < len(positional_scores):
+                    confidence = positional_scores[region_index]
+                if confidence is not None:
+                    formatted_region["score"] = confidence
+
+        return formatted_layout
+
+    @classmethod
+    def _enable_layout_score_preservation(cls, parser: Any) -> None:
+        pipeline = getattr(parser, "_pipeline", None)
+        formatter_owner = None
+        if pipeline is not None and hasattr(pipeline, "result_formatter"):
+            formatter_owner = pipeline
+        elif hasattr(parser, "result_formatter"):
+            formatter_owner = parser
+        if formatter_owner is None:
+            return
+
+        formatter = getattr(formatter_owner, "result_formatter", None)
+        if formatter is None or getattr(formatter, "_ocr_demo_preserve_score", False):
+            return
+        if not callable(getattr(formatter, "process", None)):
+            return
+
+        class ScorePreservingFormatter:
+            _ocr_demo_preserve_score = True
+
+            def __init__(self, base_formatter: Any) -> None:
+                self._base_formatter = base_formatter
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._base_formatter, name)
+
+            def process(self, *args: Any, **kwargs: Any) -> Any:
+                raw_payload = args[0] if args else None
+                try:
+                    score_source = copy.deepcopy(raw_payload)
+                except Exception:  # noqa: BLE001
+                    score_source = raw_payload
+                page_scores = cls._extract_page_region_scores(score_source)
+                formatted_layout = self._base_formatter.process(*args, **kwargs)
+                return cls._merge_region_scores(formatted_layout, page_scores)
+
+        formatter_owner.result_formatter = ScorePreservingFormatter(formatter)
+
+    @staticmethod
     def _normalize_layout_region(region: Any) -> dict[str, object] | None:
         if not isinstance(region, dict):
             return None
@@ -146,6 +294,12 @@ class GLMOCRExpertPipeline:
                 normalized_region["bbox_2d"] = [float(value) for value in bbox]
             except (TypeError, ValueError):
                 pass
+
+        confidence = GLMOCRExpertPipeline._coerce_confidence(
+            region.get("confidence") or region.get("score")
+        )
+        if confidence is not None:
+            normalized_region["confidence"] = confidence
 
         if not normalized_region:
             return None
@@ -585,6 +739,7 @@ class GLMOCRExpertPipeline:
                 layout_visualizations=layout_visualizations,
                 page_infos=page_infos,
                 page_texts=page_texts or [text],
+                markdown=text if text else None,
             )
         except OllamaError:
             raise

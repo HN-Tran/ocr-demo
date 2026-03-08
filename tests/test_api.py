@@ -102,6 +102,9 @@ class FakeBackendRouter:
             (),
             {
                 "text": "hello world",
+                "markdown": (
+                    "# Dokument\n\nhello world" if selected_backend == "expert" and mode == "plain" else None
+                ),
                 "structured": {"vendor": "ACME"} if mode == "structured" else None,
                 "page_infos": [
                     {
@@ -127,6 +130,7 @@ class FakeBackendRouter:
                                     "label": "text_block",
                                     "content": "hello world",
                                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                                    "confidence": 0.96,
                                 }
                             ],
                         }
@@ -210,17 +214,34 @@ def test_ocr_plain() -> None:
             "width": 1000,
             "height": 1200,
             "unit": "pixel",
-            "words": [],
-            "lines": [],
-            "spans": [],
+            "words": [
+                {
+                    "content": "hello",
+                    "span": {"offset": 0, "length": 5},
+                },
+                {
+                    "content": "world",
+                    "span": {"offset": 6, "length": 5},
+                },
+            ],
+            "lines": [
+                {
+                    "content": "hello world",
+                    "spans": [{"offset": 0, "length": 11}],
+                }
+            ],
+            "spans": [{"offset": 0, "length": 11}],
             "kind": "document",
             "content": "hello world",
         }
     ]
-    assert response["analyzeResult"]["paragraphs"] == [{"content": "hello world", "spans": []}]
+    assert response["analyzeResult"]["paragraphs"] == [
+        {"content": "hello world", "spans": [{"offset": 0, "length": 11}]}
+    ]
     assert response["analyzeResult"]["styles"] == []
     assert response["analyzeResult"]["languages"] == []
     assert response["text"] == "hello world"
+    assert response["markdown"] is None
     assert response["structured"] is None
     assert response["layout"] is None
     assert response["layout_visualizations"] is None
@@ -461,11 +482,13 @@ def test_ocr_forwards_backend_choice() -> None:
                     "label": "text_block",
                     "content": "hello world",
                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                    "confidence": 0.96,
                 }
             ],
         }
     ]
     assert response["layout_visualizations"] == ["data:image/png;base64,ZmFrZQ=="]
+    assert response["markdown"] == "# Dokument\n\nhello world"
     assert response["analyzeResult"]["pages"] == [
         {
             "pageNumber": 1,
@@ -473,9 +496,24 @@ def test_ocr_forwards_backend_choice() -> None:
             "width": 1000,
             "height": 1200,
             "unit": "pixel",
-            "words": [],
-            "lines": [],
-            "spans": [],
+            "words": [
+                {
+                    "content": "hello",
+                    "span": {"offset": 0, "length": 5},
+                },
+                {
+                    "content": "world",
+                    "span": {"offset": 6, "length": 5},
+                },
+            ],
+            "lines": [
+                {
+                    "content": "hello world",
+                    "spans": [{"offset": 0, "length": 11}],
+                    "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
+                }
+            ],
+            "spans": [{"offset": 0, "length": 11}],
             "kind": "document",
             "content": "hello world",
         }
@@ -483,7 +521,7 @@ def test_ocr_forwards_backend_choice() -> None:
     assert response["analyzeResult"]["paragraphs"] == [
         {
             "content": "hello world",
-            "spans": [],
+            "spans": [{"offset": 0, "length": 11}],
             "boundingRegions": [
                 {
                     "pageNumber": 1,

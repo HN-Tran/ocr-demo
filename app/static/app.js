@@ -25,6 +25,13 @@ const previewWrapEl = document.getElementById("preview-wrap");
 const resultPanelEl = document.getElementById("result-panel");
 const globalDropOverlayEl = document.getElementById("global-drop-overlay");
 const outputEl = document.getElementById("output");
+const rawWrapEl = document.getElementById("raw-wrap");
+const markdownPreviewWrapEl = document.getElementById("markdown-preview-wrap");
+const markdownPreviewEl = document.getElementById("markdown-preview");
+const resultViewSwitchEl = document.getElementById("result-view-switch");
+const resultViewLayoutBtnEl = document.getElementById("result-view-layout-btn");
+const resultViewMarkdownBtnEl = document.getElementById("result-view-markdown-btn");
+const resultViewRawBtnEl = document.getElementById("result-view-raw-btn");
 const jsonOutputEl = document.getElementById("json-output");
 const tablePreviewWrapEl = document.getElementById("table-preview-wrap");
 const tablePreviewBodyEl = document.getElementById("table-preview-body");
@@ -55,9 +62,17 @@ let previewUrl = null;
 let activeRequestController = null;
 let globalDragDepth = 0;
 let hasPendingAdvancedChanges = false;
+let activeResultView = "layout";
 const THEME_KEY = "ocr-demo-theme";
 const MAX_TOKEN_LIMIT = 128000;
 const MAX_GIF_FRAMES = 32;
+const INLINE_PREVIEWABLE_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+const TIFF_IMAGE_TYPES = new Set(["image/tif", "image/tiff", "image/x-tiff"]);
 const LAYOUT_REGION_KIND_ALIASES = new Map([
   ["text", "text"],
   ["text_block", "text"],
@@ -97,6 +112,16 @@ const LAYOUT_REGION_KIND_ALIASES = new Map([
   ["signature", "signature"],
   ["stamp", "signature"],
 ]);
+const RESULT_VIEW_BUTTONS = {
+  layout: resultViewLayoutBtnEl,
+  markdown: resultViewMarkdownBtnEl,
+  raw: resultViewRawBtnEl,
+};
+const RESULT_VIEW_WRAPS = {
+  layout: layoutWrapEl,
+  markdown: markdownPreviewWrapEl,
+  raw: rawWrapEl,
+};
 
 function isStructuredMode(modeValue) {
   return modeValue === "structured";
@@ -151,6 +176,9 @@ function setAdvancedDirty(isDirty) {
 function clearOutput() {
   outputEl.textContent = "";
   outputEl.classList.remove("hidden");
+  rawWrapEl.classList.add("hidden");
+  clearMarkdownPreview();
+  clearResultViewSwitch();
   jsonOutputEl.innerHTML = "";
   tablePreviewBodyEl.innerHTML = "";
   tablePreviewWrapEl.classList.add("hidden");
@@ -223,6 +251,43 @@ function clearPreview(message = "Keine Datei ausgewählt.") {
   previewPdfLinkEl.removeAttribute("href");
 }
 
+function resetPreviewSurfaces() {
+  previewImageStageEl.classList.add("hidden");
+  previewImageEl.classList.add("hidden");
+  previewImageEl.removeAttribute("src");
+  previewPdfEl.classList.add("hidden");
+  previewPdfEl.removeAttribute("data");
+  previewPdfLinkEl.classList.add("hidden");
+  previewPdfLinkEl.removeAttribute("href");
+}
+
+function fileExtension(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  const dotIndex = normalized.lastIndexOf(".");
+  if (dotIndex < 0) {
+    return "";
+  }
+  return normalized.slice(dotIndex);
+}
+
+function isTiffLikeFile(file) {
+  if (!file) {
+    return false;
+  }
+  if (TIFF_IMAGE_TYPES.has(file.type)) {
+    return true;
+  }
+  const extension = fileExtension(file.name);
+  return extension === ".tif" || extension === ".tiff";
+}
+
+function isInlinePreviewableImage(file) {
+  if (!file) {
+    return false;
+  }
+  return INLINE_PREVIEWABLE_IMAGE_TYPES.has(file.type);
+}
+
 function updatePreview() {
   const file = fileEl.files && fileEl.files[0];
   if (!file) {
@@ -238,26 +303,36 @@ function updatePreview() {
   previewUrl = URL.createObjectURL(file);
   previewEmptyEl.classList.add("hidden");
   clearLayoutOverlay();
+  resetPreviewSurfaces();
 
-  if (file.type.startsWith("image/")) {
+  if (isInlinePreviewableImage(file)) {
     previewImageEl.src = previewUrl;
     previewImageStageEl.classList.remove("hidden");
     previewImageEl.classList.remove("hidden");
-    previewPdfEl.classList.add("hidden");
-    previewPdfEl.removeAttribute("data");
-    previewPdfLinkEl.classList.add("hidden");
-    previewPdfLinkEl.removeAttribute("href");
     return;
   }
 
   if (file.type === "application/pdf") {
-    previewImageStageEl.classList.add("hidden");
-    previewPdfEl.data = previewUrl;
+    const pdfUrl = previewUrl;
     previewPdfEl.classList.remove("hidden");
+    window.requestAnimationFrame(() => {
+      if (previewUrl === pdfUrl) {
+        previewPdfEl.data = pdfUrl;
+      }
+    });
     previewPdfLinkEl.href = previewUrl;
+    previewPdfLinkEl.textContent = "PDF in neuem Tab öffnen";
     previewPdfLinkEl.classList.remove("hidden");
-    previewImageEl.classList.add("hidden");
-    previewImageEl.removeAttribute("src");
+    return;
+  }
+
+  if (isTiffLikeFile(file)) {
+    previewEmptyEl.textContent =
+      "TIFF-Vorschau wird vom Browser nicht zuverlässig unterstützt. OCR läuft trotzdem.";
+    previewEmptyEl.classList.remove("hidden");
+    previewPdfLinkEl.href = previewUrl;
+    previewPdfLinkEl.textContent = "Datei in neuem Tab öffnen";
+    previewPdfLinkEl.classList.remove("hidden");
     return;
   }
 
@@ -280,6 +355,48 @@ function clearLayoutDisplay() {
   layoutVisualizationsEl.innerHTML = "";
   layoutVisualizationsEl.classList.add("hidden");
   layoutWrapEl.classList.add("hidden");
+}
+
+function clearResultViewSwitch() {
+  resultViewSwitchEl.classList.add("hidden");
+  Object.entries(RESULT_VIEW_BUTTONS).forEach(([viewName, buttonEl]) => {
+    buttonEl.classList.add("hidden");
+    buttonEl.classList.remove("is-active");
+    buttonEl.setAttribute("aria-pressed", "false");
+    const wrapEl = RESULT_VIEW_WRAPS[viewName];
+    if (wrapEl) {
+      wrapEl.classList.add("hidden");
+    }
+  });
+}
+
+function setActiveResultView(viewName, availableViews) {
+  activeResultView = viewName;
+  Object.entries(RESULT_VIEW_BUTTONS).forEach(([candidateView, buttonEl]) => {
+    const isVisible = availableViews.includes(candidateView);
+    const isActive = candidateView === viewName && isVisible;
+    buttonEl.classList.toggle("hidden", !isVisible);
+    buttonEl.classList.toggle("is-active", isActive);
+    buttonEl.setAttribute("aria-pressed", String(isActive));
+    const wrapEl = RESULT_VIEW_WRAPS[candidateView];
+    if (wrapEl) {
+      wrapEl.classList.toggle("hidden", !isActive);
+    }
+  });
+  resultViewSwitchEl.classList.toggle("hidden", availableViews.length <= 1);
+}
+
+function configurePlainResultViews({ hasLayout, hasMarkdown }) {
+  const availableViews = [];
+  if (hasLayout) {
+    availableViews.push("layout");
+  }
+  if (hasMarkdown) {
+    availableViews.push("markdown");
+  }
+  availableViews.push("raw");
+  const defaultView = hasLayout ? "layout" : hasMarkdown ? "markdown" : "raw";
+  setActiveResultView(defaultView, availableViews);
 }
 
 function truncateText(value, maxLength = 140) {
@@ -309,6 +426,17 @@ function normalizeLayoutPages(layout) {
   return layout.filter(
     (page) => page && typeof page === "object" && Array.isArray(page.regions)
   );
+}
+
+function formatConfidence(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return null;
+  }
+  if (numericValue <= 1) {
+    return `${(numericValue * 100).toFixed(1)}%`;
+  }
+  return numericValue.toFixed(2);
 }
 
 function normalizedBboxToPercentages(bbox) {
@@ -365,12 +493,14 @@ function renderLayoutOverlay(layoutPages) {
     const regionKind = normalizeLayoutRegionKind(label);
     boxEl.dataset.regionKind = regionKind;
     const contentPreview = truncateText(region.content || "", 80);
-    boxEl.title = contentPreview ? `${label}: ${contentPreview}` : label;
+    const confidenceLabel = formatConfidence(region.confidence);
+    const labelWithConfidence = confidenceLabel ? `${label} (${confidenceLabel})` : label;
+    boxEl.title = contentPreview ? `${labelWithConfidence}: ${contentPreview}` : labelWithConfidence;
 
     const badgeEl = document.createElement("span");
     badgeEl.className = "preview-layout-badge";
     badgeEl.dataset.regionKind = regionKind;
-    badgeEl.textContent = label;
+    badgeEl.textContent = confidenceLabel ? `${label} ${confidenceLabel}` : label;
     boxEl.appendChild(badgeEl);
     previewLayoutOverlayEl.appendChild(boxEl);
     overlayCount += 1;
@@ -457,7 +587,8 @@ function renderLayoutPanel(layoutPages, visualizations) {
       const metaEl = document.createElement("span");
       metaEl.className = "layout-region-meta";
       const bbox = Array.isArray(region.bbox_2d) ? region.bbox_2d.join(", ") : "ohne bbox";
-      metaEl.textContent = `#${region.index ?? regionIndex} | bbox: ${bbox}`;
+      const confidenceLabel = formatConfidence(region.confidence);
+      metaEl.textContent = `#${region.index ?? regionIndex} | bbox: ${bbox}${confidenceLabel ? ` | conf: ${confidenceLabel}` : ""}`;
       regionHeadEl.appendChild(metaEl);
       regionItemEl.appendChild(regionHeadEl);
 
@@ -751,51 +882,240 @@ function renderTablePreview(matrices) {
 
   tablePreviewBodyEl.innerHTML = "";
   matrices.forEach((matrix, idx) => {
-    if (!Array.isArray(matrix) || matrix.length === 0) {
-      return;
+    const tableBlock = buildTableBlock(matrix, matrices.length > 1 ? `Tabelle ${idx + 1}` : null);
+    if (tableBlock) {
+      tablePreviewBodyEl.appendChild(tableBlock);
     }
-    if (matrices.length > 1) {
-      const label = document.createElement("p");
-      label.className = "table-preview-label";
-      label.textContent = `Tabelle ${idx + 1}`;
-      tablePreviewBodyEl.appendChild(label);
-    }
-
-    const block = document.createElement("div");
-    block.className = "table-preview-block";
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const tbody = document.createElement("tbody");
-    const headerRow = document.createElement("tr");
-
-    const width = Math.max(...matrix.map((row) => row.length), 1);
-    const normalized = matrix.map((row) =>
-      Array.from({ length: width }, (_, cellIdx) => String(row[cellIdx] ?? ""))
-    );
-
-    normalized[0].forEach((value) => {
-      const th = document.createElement("th");
-      th.textContent = value;
-      headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
-
-    normalized.slice(1).forEach((row) => {
-      const tr = document.createElement("tr");
-      row.forEach((value) => {
-        const td = document.createElement("td");
-        td.textContent = value;
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    block.appendChild(table);
-    tablePreviewBodyEl.appendChild(block);
   });
   tablePreviewWrapEl.classList.remove("hidden");
+}
+
+function buildTableBlock(matrix, labelText = null) {
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    return null;
+  }
+
+  const fragment = document.createDocumentFragment();
+  if (labelText) {
+    const label = document.createElement("p");
+    label.className = "table-preview-label";
+    label.textContent = labelText;
+    fragment.appendChild(label);
+  }
+
+  const block = document.createElement("div");
+  block.className = "table-preview-block";
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const tbody = document.createElement("tbody");
+  const headerRow = document.createElement("tr");
+
+  const width = Math.max(...matrix.map((row) => row.length), 1);
+  const normalized = matrix.map((row) =>
+    Array.from({ length: width }, (_, cellIdx) => String(row[cellIdx] ?? ""))
+  );
+
+  normalized[0].forEach((value) => {
+    const th = document.createElement("th");
+    th.textContent = value;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+
+  normalized.slice(1).forEach((row) => {
+    const tr = document.createElement("tr");
+    row.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  block.appendChild(table);
+  fragment.appendChild(block);
+  return fragment;
+}
+
+function clearMarkdownPreview() {
+  markdownPreviewEl.innerHTML = "";
+  markdownPreviewWrapEl.classList.add("hidden");
+}
+
+function appendMarkdownParagraph(container, lines) {
+  const paragraphText = lines.join("\n").trim();
+  if (!paragraphText) {
+    return;
+  }
+  const paragraphEl = document.createElement("p");
+  paragraphEl.className = "markdown-preview-paragraph";
+  paragraphEl.textContent = paragraphText;
+  container.appendChild(paragraphEl);
+}
+
+function appendMarkdownCodeBlock(container, language, code) {
+  const blockEl = document.createElement("pre");
+  blockEl.className = "markdown-preview-code";
+  if (language) {
+    blockEl.dataset.language = language;
+  }
+  const codeEl = document.createElement("code");
+  codeEl.textContent = code;
+  blockEl.appendChild(codeEl);
+  container.appendChild(blockEl);
+}
+
+function appendMarkdownList(container, items, ordered) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return;
+  }
+  const listEl = document.createElement(ordered ? "ol" : "ul");
+  listEl.className = "markdown-preview-list";
+  items.forEach((item) => {
+    const itemEl = document.createElement("li");
+    itemEl.textContent = item;
+    listEl.appendChild(itemEl);
+  });
+  container.appendChild(listEl);
+}
+
+function appendMarkdownImageReference(container, referenceText) {
+  const itemEl = document.createElement("p");
+  itemEl.className = "markdown-preview-image-ref";
+  itemEl.textContent = referenceText;
+  container.appendChild(itemEl);
+}
+
+function appendHtmlTableBlocks(container, htmlSource) {
+  const matrices = extractHtmlTableMatrices(htmlSource);
+  matrices.forEach((matrix, index) => {
+    const block = buildTableBlock(matrix, matrices.length > 1 ? `Tabelle ${index + 1}` : null);
+    if (block) {
+      container.appendChild(block);
+    }
+  });
+}
+
+function renderMarkdownPreview(markdown) {
+  clearMarkdownPreview();
+  const normalized = String(markdown || "").trim();
+  if (!normalized) {
+    return;
+  }
+
+  const htmlTableBlocks = [];
+  const source = normalized.replace(/<table[\s\S]*?<\/table>/gi, (match) => {
+    const blockIndex = htmlTableBlocks.push(match) - 1;
+    return `\n\n[[[OCR_HTML_TABLE_${blockIndex}]]]\n\n`;
+  });
+  const lines = source.split(/\r?\n/);
+  const fragment = document.createDocumentFragment();
+  let paragraphLines = [];
+
+  const flushParagraph = () => {
+    if (paragraphLines.length > 0) {
+      appendMarkdownParagraph(fragment, paragraphLines);
+      paragraphLines = [];
+    }
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    const htmlTableMatch = trimmed.match(/^\[\[\[OCR_HTML_TABLE_(\d+)]]]\s*$/);
+    if (htmlTableMatch) {
+      flushParagraph();
+      appendHtmlTableBlocks(fragment, htmlTableBlocks[Number(htmlTableMatch[1])] || "");
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      flushParagraph();
+      const language = trimmed.slice(3).trim();
+      const codeLines = [];
+      for (index += 1; index < lines.length; index += 1) {
+        if (lines[index].trim().startsWith("```")) {
+          break;
+        }
+        codeLines.push(lines[index]);
+      }
+      appendMarkdownCodeBlock(fragment, language, codeLines.join("\n"));
+      continue;
+    }
+
+    if (index + 1 < lines.length && line.includes("|") && isMarkdownSeparatorLine(lines[index + 1])) {
+      flushParagraph();
+      const tableLines = [line, lines[index + 1]];
+      for (index += 2; index < lines.length; index += 1) {
+        const tableLine = lines[index];
+        if (!tableLine.trim() || !tableLine.includes("|")) {
+          index -= 1;
+          break;
+        }
+        tableLines.push(tableLine);
+      }
+      const matrix = extractMarkdownTableMatrix(tableLines.join("\n"));
+      const block = buildTableBlock(matrix);
+      if (block) {
+        fragment.appendChild(block);
+      }
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      const level = Math.min(headingMatch[1].length + 1, 6);
+      const headingEl = document.createElement(`h${level}`);
+      headingEl.className = "markdown-preview-heading";
+      headingEl.textContent = headingMatch[2].trim();
+      fragment.appendChild(headingEl);
+      continue;
+    }
+
+    if (/^[-*+]\s+/.test(trimmed)) {
+      flushParagraph();
+      const items = [trimmed.replace(/^[-*+]\s+/, "").trim()];
+      while (index + 1 < lines.length && /^[-*+]\s+/.test(lines[index + 1].trim())) {
+        index += 1;
+        items.push(lines[index].trim().replace(/^[-*+]\s+/, "").trim());
+      }
+      appendMarkdownList(fragment, items, false);
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      flushParagraph();
+      const items = [trimmed.replace(/^\d+\.\s+/, "").trim()];
+      while (index + 1 < lines.length && /^\d+\.\s+/.test(lines[index + 1].trim())) {
+        index += 1;
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, "").trim());
+      }
+      appendMarkdownList(fragment, items, true);
+      continue;
+    }
+
+    const imageRefMatch = trimmed.match(/^!\[[^\]]*]\((.+)\)$/);
+    if (imageRefMatch) {
+      flushParagraph();
+      appendMarkdownImageReference(fragment, `Bildreferenz: ${imageRefMatch[1]}`);
+      continue;
+    }
+
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  markdownPreviewEl.appendChild(fragment);
+  markdownPreviewWrapEl.classList.remove("hidden");
 }
 
 async function runOCR() {
@@ -839,6 +1159,7 @@ async function runOCR() {
     lastResponse = data;
     setAdvancedDirty(false);
     let displayText = data.text || "(kein Inhalt)";
+    const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
     let tableMatrices = [];
 
     if (requestMode === "plain" && requestTask === "extract_table_markdown") {
@@ -865,13 +1186,27 @@ async function runOCR() {
     if (showStructured) {
       outputEl.textContent = "";
       outputEl.classList.add("hidden");
+      rawWrapEl.classList.add("hidden");
+      clearMarkdownPreview();
+      clearResultViewSwitch();
       tablePreviewBodyEl.innerHTML = "";
       tablePreviewWrapEl.classList.add("hidden");
       lastTableMatrices = [];
     } else {
       outputEl.classList.remove("hidden");
       outputEl.textContent = displayText;
+      rawWrapEl.classList.remove("hidden");
+      renderMarkdownPreview(markdownPreview);
       renderTablePreview(tableMatrices);
+      const layoutPages = normalizeLayoutPages(data.layout);
+      renderLayoutPanel(layoutPages, data.layout_visualizations);
+      renderLayoutOverlay(layoutPages);
+      configurePlainResultViews({
+        hasLayout:
+          layoutPages.length > 0 ||
+          (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
+        hasMarkdown: markdownPreview.trim().length > 0,
+      });
       lastTableMatrices = tableMatrices;
     }
     structuredWrapEl.classList.toggle("hidden", !showStructured);
@@ -882,10 +1217,6 @@ async function runOCR() {
     } else {
       jsonOutputEl.innerHTML = "";
     }
-
-    const layoutPages = normalizeLayoutPages(data.layout);
-    renderLayoutPanel(layoutPages, data.layout_visualizations);
-    renderLayoutOverlay(layoutPages);
 
     const warnings = (data.warnings || []).join(" | ");
     const backend = data.backend || String(payload.get("backend") || "direct");
@@ -1022,6 +1353,22 @@ previewImageEl.addEventListener("load", () => {
   const layoutPages = normalizeLayoutPages(lastResponse?.layout);
   renderLayoutOverlay(layoutPages);
 });
+previewImageEl.addEventListener("error", () => {
+  const file = currentFile();
+  clearLayoutOverlay();
+  previewImageStageEl.classList.add("hidden");
+  previewImageEl.classList.add("hidden");
+  previewImageEl.removeAttribute("src");
+  previewEmptyEl.textContent = isTiffLikeFile(file)
+    ? "TIFF-Vorschau wird vom Browser nicht zuverlässig unterstützt. OCR läuft trotzdem."
+    : `Vorschau für "${file?.type || file?.name || "unbekannt"}" konnte nicht geladen werden.`;
+  previewEmptyEl.classList.remove("hidden");
+  if (previewUrl) {
+    previewPdfLinkEl.href = previewUrl;
+    previewPdfLinkEl.textContent = "Datei in neuem Tab öffnen";
+    previewPdfLinkEl.classList.remove("hidden");
+  }
+});
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();
   setAdvancedDirty(true);
@@ -1078,6 +1425,18 @@ copyBtn.addEventListener("click", async () => {
     : outputEl.textContent || "";
   if (!text) return;
   await navigator.clipboard.writeText(text);
+});
+
+Object.entries(RESULT_VIEW_BUTTONS).forEach(([viewName, buttonEl]) => {
+  buttonEl.addEventListener("click", () => {
+    if (buttonEl.classList.contains("hidden")) {
+      return;
+    }
+    const availableViews = Object.entries(RESULT_VIEW_BUTTONS)
+      .filter(([, candidateButton]) => !candidateButton.classList.contains("hidden"))
+      .map(([candidateView]) => candidateView);
+    setActiveResultView(viewName, availableViews);
+  });
 });
 
 downloadBtn.addEventListener("click", () => {

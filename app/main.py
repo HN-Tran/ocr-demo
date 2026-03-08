@@ -9,8 +9,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.api.routes import router
+from app.api.routes import compat_router, router
 from app.config import Settings, get_settings
+from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.expert_pipeline import GLMOCRExpertPipeline
 from app.services.ocr_pipeline import OCRPipeline
@@ -24,6 +25,15 @@ def _normalize_base_path(value: str) -> str:
     if not path.startswith("/"):
         path = f"/{path}"
     return path.rstrip("/")
+
+
+def _status_payload() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "prebuilt-read",
+        "apiStatus": "Healthy",
+        "apiStatusMessage": "Service is running.",
+    }
 
 
 def _create_ocr_app(*, settings: Settings) -> FastAPI:
@@ -62,6 +72,9 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     app.state.ollama_client = ollama_client
     app.state.ocr_pipeline = ocr_pipeline
     app.state.ocr_backend_router = ocr_backend_router
+    app.state.analyze_operation_store = AnalyzeOperationStore(
+        storage_dir=settings.analyze_store_dir
+    )
 
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
@@ -72,6 +85,13 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(base_dir / "static")), name="static")
     app.include_router(router)
+    app.include_router(compat_router)
+
+    @app.get("/status")
+    async def status() -> dict[str, str]:
+        return _status_payload()
+
+    app.add_api_route("/status/", status, methods=["GET"], include_in_schema=False)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request) -> HTMLResponse:
@@ -101,6 +121,12 @@ def create_app() -> FastAPI:
         return ocr_app
 
     root_app = FastAPI(title=settings.app_name)
+
+    @root_app.get("/status")
+    async def status() -> dict[str, str]:
+        return _status_payload()
+
+    root_app.add_api_route("/status/", status, methods=["GET"], include_in_schema=False)
     root_app.mount(base_path, ocr_app)
     return root_app
 
