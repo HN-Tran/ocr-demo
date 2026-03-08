@@ -58,6 +58,45 @@ let hasPendingAdvancedChanges = false;
 const THEME_KEY = "ocr-demo-theme";
 const MAX_TOKEN_LIMIT = 128000;
 const MAX_GIF_FRAMES = 32;
+const LAYOUT_REGION_KIND_ALIASES = new Map([
+  ["text", "text"],
+  ["text_block", "text"],
+  ["textblock", "text"],
+  ["paragraph", "text"],
+  ["body", "text"],
+  ["body_text", "text"],
+  ["plain_text", "text"],
+  ["line", "text"],
+  ["table", "table"],
+  ["table_block", "table"],
+  ["table_region", "table"],
+  ["title", "title"],
+  ["heading", "title"],
+  ["header_title", "title"],
+  ["section_title", "title"],
+  ["figure", "figure"],
+  ["image", "figure"],
+  ["picture", "figure"],
+  ["illustration", "figure"],
+  ["chart", "figure"],
+  ["caption", "caption"],
+  ["list", "list"],
+  ["list_item", "list"],
+  ["bullet_list", "list"],
+  ["header", "header"],
+  ["page_header", "header"],
+  ["footer", "footer"],
+  ["page_footer", "footer"],
+  ["footnote", "footer"],
+  ["formula", "formula"],
+  ["equation", "formula"],
+  ["math", "formula"],
+  ["code", "code"],
+  ["barcode", "code"],
+  ["qr_code", "code"],
+  ["signature", "signature"],
+  ["stamp", "signature"],
+]);
 
 function isStructuredMode(modeValue) {
   return modeValue === "structured";
@@ -251,6 +290,18 @@ function truncateText(value, maxLength = 140) {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
+function normalizeLayoutRegionKind(label) {
+  const normalized = String(label || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!normalized) {
+    return "other";
+  }
+  return LAYOUT_REGION_KIND_ALIASES.get(normalized) || "other";
+}
+
 function normalizeLayoutPages(layout) {
   if (!Array.isArray(layout)) {
     return [];
@@ -311,11 +362,14 @@ function renderLayoutOverlay(layoutPages) {
     boxEl.style.height = `${percentages.height}%`;
 
     const label = String(region.label || `Region ${index + 1}`);
+    const regionKind = normalizeLayoutRegionKind(label);
+    boxEl.dataset.regionKind = regionKind;
     const contentPreview = truncateText(region.content || "", 80);
     boxEl.title = contentPreview ? `${label}: ${contentPreview}` : label;
 
     const badgeEl = document.createElement("span");
     badgeEl.className = "preview-layout-badge";
+    badgeEl.dataset.regionKind = regionKind;
     badgeEl.textContent = label;
     boxEl.appendChild(badgeEl);
     previewLayoutOverlayEl.appendChild(boxEl);
@@ -387,12 +441,17 @@ function renderLayoutPanel(layoutPages, visualizations) {
     regions.forEach((region, regionIndex) => {
       const regionItemEl = document.createElement("li");
       regionItemEl.className = "layout-region-item";
+      const label = String(region.label || `Region ${regionIndex + 1}`);
+      const regionKind = normalizeLayoutRegionKind(label);
+      regionItemEl.dataset.regionKind = regionKind;
 
       const regionHeadEl = document.createElement("div");
       regionHeadEl.className = "layout-region-head";
 
       const labelEl = document.createElement("strong");
-      labelEl.textContent = String(region.label || `Region ${regionIndex + 1}`);
+      labelEl.className = "layout-region-label";
+      labelEl.dataset.regionKind = regionKind;
+      labelEl.textContent = label;
       regionHeadEl.appendChild(labelEl);
 
       const metaEl = document.createElement("span");

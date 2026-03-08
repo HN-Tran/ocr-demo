@@ -100,6 +100,37 @@ Response-Format:
 
 ```json
 {
+  "status": "succeeded",
+  "createdDateTime": "2026-03-09T08:00:00+00:00",
+  "lastUpdatedDateTime": "2026-03-09T08:00:01+00:00",
+  "analyzeResult": {
+    "apiVersion": "2026-03-09-preview",
+    "modelId": "glm-ocr:latest",
+    "stringIndexType": "textElements",
+    "content": "...",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "angle": 0.0,
+        "width": 2480,
+        "height": 3508,
+        "unit": "pixel",
+        "words": [],
+        "lines": [],
+        "spans": [],
+        "kind": "document",
+        "content": "..."
+      }
+    ],
+    "paragraphs": [
+      {
+        "content": "...",
+        "spans": []
+      }
+    ],
+    "styles": [],
+    "languages": []
+  },
   "text": "...",
   "structured": null,
   "model": "glm-ocr:latest",

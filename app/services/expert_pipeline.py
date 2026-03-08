@@ -152,7 +152,7 @@ class GLMOCRExpertPipeline:
         return normalized_region
 
     @classmethod
-    def _extract_layout(cls, parse_result: Any) -> list[dict[str, object]] | None:
+    def _extract_raw_layout_pages(cls, parse_result: Any) -> list[Any] | None:
         raw_layout = cls._get_result_value(parse_result, "json_result")
         if raw_layout is None:
             return None
@@ -163,6 +163,13 @@ class GLMOCRExpertPipeline:
             candidate_pages = raw_layout
 
         if not isinstance(candidate_pages, list):
+            return None
+        return candidate_pages
+
+    @classmethod
+    def _extract_layout(cls, parse_result: Any) -> list[dict[str, object]] | None:
+        candidate_pages = cls._extract_raw_layout_pages(parse_result)
+        if candidate_pages is None:
             return None
 
         pages: list[dict[str, object]] = []
@@ -190,6 +197,94 @@ class GLMOCRExpertPipeline:
             pages.append({"page_number": page_number, "regions": regions})
 
         return pages or None
+
+    @staticmethod
+    def _infer_page_size_from_regions(regions: list[dict[str, object]]) -> tuple[float, float] | None:
+        max_x = 0.0
+        max_y = 0.0
+        found_bbox = False
+        for region in regions:
+            bbox = region.get("bbox_2d")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            try:
+                _, _, x2, y2 = [float(value) for value in bbox]
+            except (TypeError, ValueError):
+                continue
+            max_x = max(max_x, x2)
+            max_y = max(max_y, y2)
+            found_bbox = True
+        if not found_bbox:
+            return None
+        return max_x, max_y
+
+    @classmethod
+    def _extract_page_infos(
+        cls,
+        parse_result: Any,
+        *,
+        layout: list[dict[str, object]] | None,
+    ) -> list[dict[str, object]] | None:
+        candidate_pages = cls._extract_raw_layout_pages(parse_result)
+        if candidate_pages is None and not layout:
+            return None
+
+        layout_by_page = {
+            int(page.get("page_number", index)): page
+            for index, page in enumerate(layout or [], start=1)
+            if isinstance(page, dict)
+        }
+        page_infos: list[dict[str, object]] = []
+        page_count = max(len(candidate_pages or []), len(layout or []))
+        for page_index in range(1, page_count + 1):
+            raw_page = None
+            if candidate_pages and page_index - 1 < len(candidate_pages):
+                raw_page = candidate_pages[page_index - 1]
+            raw_page_dict = raw_page if isinstance(raw_page, dict) else {}
+            page_number = raw_page_dict.get("page_number") or raw_page_dict.get("page") or page_index
+            try:
+                normalized_page_number = int(page_number)
+            except (TypeError, ValueError):
+                normalized_page_number = page_index
+
+            page_info: dict[str, object] = {
+                "page_number": normalized_page_number,
+                "angle": 0.0,
+                "unit": "pixel",
+                "kind": "document",
+                "words": [],
+                "lines": [],
+                "spans": [],
+            }
+
+            for key in ("angle", "width", "height"):
+                value = raw_page_dict.get(key)
+                if isinstance(value, (int, float)):
+                    page_info[key] = float(value) if key == "angle" else value
+            for key in ("unit", "kind"):
+                value = raw_page_dict.get(key)
+                if isinstance(value, str) and value.strip():
+                    page_info[key] = value.strip()
+            for key in ("words", "lines", "spans"):
+                value = raw_page_dict.get(key)
+                if isinstance(value, list):
+                    page_info[key] = value
+
+            if "width" not in page_info or "height" not in page_info:
+                page_layout = layout_by_page.get(normalized_page_number)
+                regions = page_layout.get("regions") if isinstance(page_layout, dict) else None
+                if isinstance(regions, list):
+                    inferred_size = cls._infer_page_size_from_regions(
+                        [region for region in regions if isinstance(region, dict)]
+                    )
+                    if inferred_size is not None:
+                        inferred_width, inferred_height = inferred_size
+                        page_info.setdefault("width", inferred_width)
+                        page_info.setdefault("height", inferred_height)
+
+            page_infos.append(page_info)
+
+        return page_infos or None
 
     @staticmethod
     def _path_to_data_url(path: Path) -> str | None:
@@ -297,6 +392,27 @@ class GLMOCRExpertPipeline:
                 page_texts.append(page_text)
 
         return "\n\n".join(page_texts).strip()
+
+    @staticmethod
+    def _build_page_texts_from_layout(layout: list[dict[str, object]] | None) -> list[str] | None:
+        if not layout:
+            return None
+
+        page_texts: list[str] = []
+        for page in layout:
+            if not isinstance(page, dict):
+                continue
+            regions = page.get("regions")
+            if not isinstance(regions, list):
+                page_texts.append("")
+                continue
+            region_texts = [
+                str(region.get("content", "")).strip()
+                for region in regions
+                if isinstance(region, dict) and str(region.get("content", "")).strip()
+            ]
+            page_texts.append("\n".join(region_texts).strip())
+        return page_texts
 
     async def _fallback_to_direct(
         self,
@@ -415,12 +531,14 @@ class GLMOCRExpertPipeline:
             )
 
             layout = self._extract_layout(parse_result)
+            page_infos = self._extract_page_infos(parse_result, layout=layout)
             text = self._extract_markdown(parse_result)
             layout_visualizations = (
                 self._extract_layout_visualizations(parse_result)
                 if selected_enable_layout
                 else None
             )
+            page_texts = self._build_page_texts_from_layout(layout)
             warnings: list[str] = []
             if not text:
                 text = self._build_text_from_layout(layout)
@@ -465,6 +583,8 @@ class GLMOCRExpertPipeline:
                 warnings=warnings,
                 layout=layout,
                 layout_visualizations=layout_visualizations,
+                page_infos=page_infos,
+                page_texts=page_texts or [text],
             )
         except OllamaError:
             raise

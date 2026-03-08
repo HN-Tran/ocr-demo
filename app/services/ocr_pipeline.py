@@ -126,6 +126,8 @@ class OCRResult:
     warnings: list[str]
     layout: list[dict[str, object]] | None = None
     layout_visualizations: list[str] | None = None
+    page_infos: list[dict[str, object]] | None = None
+    page_texts: list[str] | None = None
 
 
 class OCRPipeline:
@@ -151,7 +153,21 @@ class OCRPipeline:
             encoding="utf-8"
         )
 
-    def _preprocess(self, image_bytes: bytes) -> tuple[bytes, list[str]]:
+    @staticmethod
+    def _build_page_info(*, page_number: int, width: int, height: int) -> dict[str, object]:
+        return {
+            "page_number": page_number,
+            "angle": 0.0,
+            "width": width,
+            "height": height,
+            "unit": "pixel",
+            "kind": "document",
+            "words": [],
+            "lines": [],
+            "spans": [],
+        }
+
+    def _preprocess(self, image_bytes: bytes, *, page_number: int) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
         with Image.open(BytesIO(image_bytes)) as image:
             image = ImageOps.exif_transpose(image)
@@ -170,7 +186,11 @@ class OCRPipeline:
 
             output = BytesIO()
             image.save(output, format="PNG", optimize=True)
-            return output.getvalue(), warnings
+            return output.getvalue(), warnings, self._build_page_info(
+                page_number=page_number,
+                width=image.width,
+                height=image.height,
+            )
 
     def _render_pdf_pages(self, pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
         warnings: list[str] = []
@@ -263,7 +283,7 @@ class OCRPipeline:
 
     def _build_storyboard_from_prepared_images(
         self, prepared_images: list[bytes]
-    ) -> tuple[bytes, list[str]]:
+    ) -> tuple[bytes, list[str], dict[str, object]]:
         if not prepared_images:
             raise ValueError("Es sind keine GIF-Frames für das Storyboard verfügbar")
 
@@ -292,7 +312,10 @@ class OCRPipeline:
 
         output = BytesIO()
         storyboard.save(output, format="PNG", optimize=True)
-        prepared_storyboard, preprocess_warnings = self._preprocess(output.getvalue())
+        prepared_storyboard, preprocess_warnings, page_info = self._preprocess(
+            output.getvalue(),
+            page_number=1,
+        )
         warnings = [
             (
                 "Animiertes GIF wurde für describe_image als Storyboard aus "
@@ -301,7 +324,7 @@ class OCRPipeline:
             )
         ]
         warnings.extend(preprocess_warnings)
-        return prepared_storyboard, warnings
+        return prepared_storyboard, warnings, page_info
 
     def _build_plain_prompt(self, *, selected_task: str, custom_prompt: str | None) -> str:
         if custom_prompt and custom_prompt.strip():
@@ -527,7 +550,7 @@ class OCRPipeline:
 
     def _prepare_images(
         self, *, image_bytes: bytes, content_type: str | None, gif_max_frames: int
-    ) -> tuple[list[bytes], list[str]]:
+    ) -> tuple[list[bytes], list[str], list[dict[str, object]]]:
         warnings: list[str] = []
         if content_type == "application/pdf":
             source_images, pdf_warnings = self._render_pdf_pages(image_bytes)
@@ -541,14 +564,19 @@ class OCRPipeline:
             source_images = [image_bytes]
 
         prepared_images: list[bytes] = []
+        page_infos: list[dict[str, object]] = []
         total_pages = len(source_images)
         for idx, page_image in enumerate(source_images, start=1):
-            prepared_image, preprocess_warnings = self._preprocess(page_image)
+            prepared_image, preprocess_warnings, page_info = self._preprocess(
+                page_image,
+                page_number=idx,
+            )
             prepared_images.append(prepared_image)
+            page_infos.append(page_info)
             warnings.extend(
                 self._with_page_prefix(warning, idx, total_pages) for warning in preprocess_warnings
             )
-        return prepared_images, warnings
+        return prepared_images, warnings, page_infos
 
     async def _run_plain_on_image(
         self,
@@ -732,7 +760,7 @@ class OCRPipeline:
         if selected_gif_max_frames > MAX_GIF_MAX_FRAMES:
             raise ValueError(f"gif_max_frames darf {MAX_GIF_MAX_FRAMES} nicht überschreiten")
 
-        prepared_images, prepare_warnings = self._prepare_images(
+        prepared_images, prepare_warnings, page_infos = self._prepare_images(
             image_bytes=image_bytes,
             content_type=content_type,
             gif_max_frames=selected_gif_max_frames,
@@ -787,8 +815,8 @@ class OCRPipeline:
                         "(read left-to-right, top-to-bottom). Describe the visual action in 1-3 concise sentences. "
                         "If no visible text exists, focus on scene/action only."
                     )
-                storyboard_image, storyboard_warnings = self._build_storyboard_from_prepared_images(
-                    prepared_images
+                storyboard_image, storyboard_warnings, storyboard_page_info = (
+                    self._build_storyboard_from_prepared_images(prepared_images)
                 )
                 warnings.extend(storyboard_warnings)
                 text, storyboard_run_warnings = await self._run_plain_on_image(
@@ -800,6 +828,8 @@ class OCRPipeline:
                     has_custom_plain_prompt=has_custom_plain_prompt,
                 )
                 warnings.extend(storyboard_run_warnings)
+                response_page_texts = [text]
+                response_page_infos = [storyboard_page_info]
             else:
                 page_texts: list[str] = []
                 for page_index, prepared_image in enumerate(prepared_images, start=1):
@@ -824,6 +854,8 @@ class OCRPipeline:
                         f"--- Seite {page_index} ---\n{page_texts[page_index - 1]}"
                         for page_index in range(1, total_pages + 1)
                     )
+                response_page_texts = page_texts
+                response_page_infos = page_infos
             structured = None
         else:
             schema = SCHEMA_REGISTRY[resolved_schema_name or ""]
@@ -854,6 +886,8 @@ class OCRPipeline:
                     f"--- Seite {page_index} ---\n{raw_outputs[page_index - 1]}"
                     for page_index in range(1, total_pages + 1)
                 )
+            response_page_texts = raw_outputs
+            response_page_infos = page_infos
 
             structured = None
             if parsed_payloads:
@@ -893,4 +927,6 @@ class OCRPipeline:
             schema_name=resolved_schema_name,
             latency_ms=latency_ms,
             warnings=warnings,
+            page_infos=response_page_infos,
+            page_texts=response_page_texts,
         )

@@ -181,6 +181,15 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
     parser = _FakeParser(
         layout=[
             {
+                "page_number": 1,
+                "angle": 0.031004199758172,
+                "width": 3000,
+                "height": 4000,
+                "unit": "pixel",
+                "words": [{"content": "Expert"}],
+                "lines": [{"content": "Expert OCR text"}],
+                "spans": [{"offset": 0, "length": 15}],
+                "kind": "document",
                 "regions": [
                     {
                         "index": 0,
@@ -232,6 +241,20 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
     assert result.layout_visualizations is not None
     assert len(result.layout_visualizations) == 1
     assert result.layout_visualizations[0].startswith("data:image/png;base64,")
+    assert result.page_texts == ["Expert OCR text"]
+    assert result.page_infos == [
+        {
+            "page_number": 1,
+            "angle": 0.031004199758172,
+            "width": 3000,
+            "height": 4000,
+            "unit": "pixel",
+            "words": [{"content": "Expert"}],
+            "lines": [{"content": "Expert OCR text"}],
+            "spans": [{"offset": 0, "length": 15}],
+            "kind": "document",
+        }
+    ]
     assert any("Expert-Layout: 1 Regionen auf 1 Seite(n) erkannt." in w for w in result.warnings)
 
 

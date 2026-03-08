@@ -381,10 +381,13 @@ button:disabled {
 }
 
 .preview-layout-box {
+  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #ff7b54 14%, transparent);
+  --layout-region-ink: rgb(17 12 9 / 82%);
   position: absolute;
-  border: 2px solid color-mix(in srgb, #ff7b54 78%, #fff 22%);
+  border: 2px solid var(--layout-region-accent);
   border-radius: 8px;
-  background: color-mix(in srgb, #ff7b54 14%, transparent);
+  background: var(--layout-region-fill);
   box-shadow: 0 0 0 1px rgb(17 12 9 / 20%);
 }
 
@@ -396,7 +399,7 @@ button:disabled {
   max-width: calc(100% - 0.4rem);
   padding: 0.14rem 0.36rem;
   border-radius: 999px;
-  background: rgb(17 12 9 / 82%);
+  background: color-mix(in srgb, var(--layout-region-accent) 72%, var(--layout-region-ink) 28%);
   color: #fff;
   font-size: 0.7rem;
   font-weight: 700;
@@ -649,8 +652,14 @@ pre {
 }
 
 .layout-region-item {
+  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #ff7b54 10%, transparent);
   display: grid;
   gap: 0.2rem;
+  border-left: 0.28rem solid var(--layout-region-accent);
+  border-radius: 0.55rem;
+  background: var(--layout-region-fill);
+  padding: 0.42rem 0.5rem 0.42rem 0.72rem;
 }
 
 .layout-region-head {
@@ -666,12 +675,96 @@ pre {
   font-size: 0.76rem;
 }
 
+.layout-region-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--layout-region-accent) 18%, var(--panel) 82%);
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
 .layout-region-content {
   margin: 0;
   color: var(--ink);
   font-size: 0.86rem;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.preview-layout-box[data-region-kind="text"],
+.layout-region-item[data-region-kind="text"] {
+  --layout-region-accent: color-mix(in srgb, #ef6c47 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #ef6c47 12%, transparent);
+}
+
+.preview-layout-box[data-region-kind="table"],
+.layout-region-item[data-region-kind="table"] {
+  --layout-region-accent: color-mix(in srgb, #1b8f5a 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #1b8f5a 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="title"],
+.layout-region-item[data-region-kind="title"] {
+  --layout-region-accent: color-mix(in srgb, #c95f1a 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #c95f1a 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="figure"],
+.layout-region-item[data-region-kind="figure"] {
+  --layout-region-accent: color-mix(in srgb, #2b79c2 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #2b79c2 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="caption"],
+.layout-region-item[data-region-kind="caption"] {
+  --layout-region-accent: color-mix(in srgb, #7d67c8 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #7d67c8 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="list"],
+.layout-region-item[data-region-kind="list"] {
+  --layout-region-accent: color-mix(in srgb, #9b7d16 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #9b7d16 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="header"],
+.layout-region-item[data-region-kind="header"] {
+  --layout-region-accent: color-mix(in srgb, #0c8a8a 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #0c8a8a 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="footer"],
+.layout-region-item[data-region-kind="footer"] {
+  --layout-region-accent: color-mix(in srgb, #8b6f62 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #8b6f62 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="formula"],
+.layout-region-item[data-region-kind="formula"] {
+  --layout-region-accent: color-mix(in srgb, #b1497f 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #b1497f 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="code"],
+.layout-region-item[data-region-kind="code"] {
+  --layout-region-accent: color-mix(in srgb, #5753c6 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #5753c6 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="signature"],
+.layout-region-item[data-region-kind="signature"] {
+  --layout-region-accent: color-mix(in srgb, #b55b2d 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #b55b2d 14%, transparent);
+}
+
+.preview-layout-box[data-region-kind="other"],
+.layout-region-item[data-region-kind="other"] {
+  --layout-region-accent: color-mix(in srgb, #6a7280 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #6a7280 12%, transparent);
 }
 
 .layout-visualizations {

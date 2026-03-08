@@ -12,6 +12,8 @@ from app.services.backend_router import OCRBackendRouter
 from app.services.ollama_client import OllamaClient, OllamaError
 
 router = APIRouter(prefix="/api")
+API_VERSION = "2026-03-09-preview"
+STRING_INDEX_TYPE = "textElements"
 ALLOWED_MIME_TYPES = {
     "image/png",
     "image/jpeg",
@@ -22,6 +24,10 @@ ALLOWED_MIME_TYPES = {
     "image/x-tiff",
     "application/pdf",
 }
+
+
+def _isoformat_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _normalize_content_type(content_type: str | None) -> str | None:
@@ -115,6 +121,162 @@ def _resolve_bool_param(
     )
 
 
+def _page_number(value: object, fallback: int) -> int:
+    return value if isinstance(value, int) and value > 0 else fallback
+
+
+def _bbox_to_polygon(value: object) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    if not all(isinstance(point, (int, float)) for point in value):
+        return None
+    x1, y1, x2, y2 = [float(point) for point in value]
+    return [x1, y1, x2, y1, x2, y2, x1, y2]
+
+
+def _split_page_paragraphs(page_text: str) -> list[str]:
+    normalized = page_text.strip()
+    if not normalized:
+        return []
+
+    paragraph_blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
+    if len(paragraph_blocks) > 1:
+        return paragraph_blocks
+
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    if 1 < len(lines) <= 12:
+        return lines
+    return [normalized]
+
+
+def _page_entry_base(page_info: object, page_index: int) -> dict[str, object]:
+    info = page_info if isinstance(page_info, dict) else {}
+    page_entry: dict[str, object] = {
+        "pageNumber": _page_number(info.get("page_number"), page_index),
+        "angle": float(info["angle"]) if isinstance(info.get("angle"), (int, float)) else 0.0,
+        "unit": info["unit"].strip()
+        if isinstance(info.get("unit"), str) and info["unit"].strip()
+        else "pixel",
+        "words": info["words"] if isinstance(info.get("words"), list) else [],
+        "lines": info["lines"] if isinstance(info.get("lines"), list) else [],
+        "spans": info["spans"] if isinstance(info.get("spans"), list) else [],
+        "kind": info["kind"].strip()
+        if isinstance(info.get("kind"), str) and info["kind"].strip()
+        else "document",
+    }
+    if isinstance(info.get("width"), (int, float)):
+        page_entry["width"] = info["width"]
+    if isinstance(info.get("height"), (int, float)):
+        page_entry["height"] = info["height"]
+    return page_entry
+
+
+def _page_content_from_layout(page: object) -> str:
+    if not isinstance(page, dict):
+        return ""
+    regions = page.get("regions")
+    if not isinstance(regions, list):
+        return ""
+    page_content = [
+        str(region.get("content") or "").strip()
+        for region in regions
+        if isinstance(region, dict) and str(region.get("content") or "").strip()
+    ]
+    return "\n".join(page_content).strip()
+
+
+def _build_paragraphs(
+    layout: list[dict[str, object]] | None,
+    page_texts: list[str] | None,
+    content: str,
+) -> list[dict[str, object]]:
+    paragraphs: list[dict[str, object]] = []
+    if layout:
+        for page_index, page in enumerate(layout, start=1):
+            page_number = _page_number(page.get("page_number"), page_index)
+            regions = page.get("regions")
+            if not isinstance(regions, list):
+                continue
+            for region in regions:
+                if not isinstance(region, dict):
+                    continue
+                region_content = str(region.get("content") or "").strip()
+                if not region_content:
+                    continue
+                paragraph: dict[str, object] = {"content": region_content, "spans": []}
+                polygon = _bbox_to_polygon(region.get("bbox_2d"))
+                if polygon is not None:
+                    paragraph["boundingRegions"] = [
+                        {
+                            "pageNumber": page_number,
+                            "polygon": polygon,
+                        }
+                    ]
+                paragraphs.append(paragraph)
+    if paragraphs:
+        return paragraphs
+
+    for page_text in page_texts or []:
+        for paragraph_text in _split_page_paragraphs(page_text):
+            paragraphs.append({"content": paragraph_text, "spans": []})
+
+    if paragraphs or not content.strip():
+        return paragraphs
+    return [{"content": content.strip(), "spans": []}]
+
+
+def _build_pages(
+    page_infos: list[dict[str, object]] | None,
+    page_texts: list[str] | None,
+    layout: list[dict[str, object]] | None,
+    content: str,
+) -> list[dict[str, object]]:
+    page_count = max(len(page_infos or []), len(page_texts or []), len(layout or []))
+    if page_count == 0:
+        if not content.strip():
+            return []
+        page_entry = _page_entry_base({}, 1)
+        page_entry["content"] = content.strip()
+        return [page_entry]
+
+    pages: list[dict[str, object]] = []
+    for page_index in range(1, page_count + 1):
+        page_info = (page_infos or [])[page_index - 1] if page_index - 1 < len(page_infos or []) else {}
+        page_layout = (layout or [])[page_index - 1] if page_index - 1 < len(layout or []) else None
+        page_text = (
+            (page_texts or [])[page_index - 1]
+            if page_index - 1 < len(page_texts or [])
+            else _page_content_from_layout(page_layout)
+        )
+        page_entry = _page_entry_base(page_info, page_index)
+        if page_text.strip():
+            page_entry["content"] = page_text.strip()
+        pages.append(page_entry)
+    return pages
+
+
+def _build_analyze_result(
+    *,
+    content: str,
+    model_id: str,
+    layout: list[dict[str, object]] | None,
+    page_infos: list[dict[str, object]] | None,
+    page_texts: list[str] | None,
+) -> dict[str, object]:
+    paragraphs = _build_paragraphs(layout, page_texts, content)
+    pages = _build_pages(page_infos, page_texts, layout, content)
+    return {
+        "apiVersion": API_VERSION,
+        "modelId": model_id,
+        "stringIndexType": STRING_INDEX_TYPE,
+        "content": content,
+        "pages": pages,
+        "paragraphs": paragraphs,
+        "styles": [],
+        "languages": [],
+    }
+
+
 def get_ocr_backend_router(request: Request) -> OCRBackendRouter:
     return cast(OCRBackendRouter, request.app.state.ocr_backend_router)
 
@@ -168,6 +330,7 @@ async def ocr(
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
+    started_at = datetime.now(timezone.utc)
 
     mode = cast(str, _resolve_text_param(mode, _query_param(request, "mode"), "plain"))
     schema_name = _resolve_text_param(schema_name, _query_param(request, "schema_name"), None)
@@ -231,7 +394,21 @@ async def ocr(
             detail=f"Unerwarteter OCR-Fehler: {exc}",
         ) from exc
 
+    completed_at = datetime.now(timezone.utc)
+    content = result.text
+    analyze_result = _build_analyze_result(
+        content=content,
+        model_id=result.model,
+        layout=result.layout,
+        page_infos=getattr(result, "page_infos", None),
+        page_texts=getattr(result, "page_texts", None),
+    )
+
     return {
+        "status": "succeeded",
+        "createdDateTime": _isoformat_utc(started_at),
+        "lastUpdatedDateTime": _isoformat_utc(completed_at),
+        "analyzeResult": analyze_result,
         "text": result.text,
         "structured": result.structured,
         "layout": result.layout,

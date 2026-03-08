@@ -103,6 +103,20 @@ class FakeBackendRouter:
             {
                 "text": "hello world",
                 "structured": {"vendor": "ACME"} if mode == "structured" else None,
+                "page_infos": [
+                    {
+                        "page_number": 1,
+                        "angle": 0.0,
+                        "width": 1000,
+                        "height": 1200,
+                        "unit": "pixel",
+                        "words": [],
+                        "lines": [],
+                        "spans": [],
+                        "kind": "document",
+                    }
+                ],
+                "page_texts": ["hello world"],
                 "layout": (
                     [
                         {
@@ -182,6 +196,30 @@ def test_ocr_plain() -> None:
             pipeline=_pipeline(),
         )
     )
+    assert response["status"] == "succeeded"
+    assert response["createdDateTime"]
+    assert response["lastUpdatedDateTime"]
+    assert response["analyzeResult"]["apiVersion"] == "2026-03-09-preview"
+    assert response["analyzeResult"]["modelId"] == "fake-model"
+    assert response["analyzeResult"]["stringIndexType"] == "textElements"
+    assert response["analyzeResult"]["content"] == "hello world"
+    assert response["analyzeResult"]["pages"] == [
+        {
+            "pageNumber": 1,
+            "angle": 0.0,
+            "width": 1000,
+            "height": 1200,
+            "unit": "pixel",
+            "words": [],
+            "lines": [],
+            "spans": [],
+            "kind": "document",
+            "content": "hello world",
+        }
+    ]
+    assert response["analyzeResult"]["paragraphs"] == [{"content": "hello world", "spans": []}]
+    assert response["analyzeResult"]["styles"] == []
+    assert response["analyzeResult"]["languages"] == []
     assert response["text"] == "hello world"
     assert response["structured"] is None
     assert response["layout"] is None
@@ -222,6 +260,7 @@ def test_ocr_structured_with_schema() -> None:
         )
     )
     assert response["structured"] == {"vendor": "ACME"}
+    assert response["analyzeResult"]["content"] == "hello world"
 
 
 def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
@@ -427,6 +466,32 @@ def test_ocr_forwards_backend_choice() -> None:
         }
     ]
     assert response["layout_visualizations"] == ["data:image/png;base64,ZmFrZQ=="]
+    assert response["analyzeResult"]["pages"] == [
+        {
+            "pageNumber": 1,
+            "angle": 0.0,
+            "width": 1000,
+            "height": 1200,
+            "unit": "pixel",
+            "words": [],
+            "lines": [],
+            "spans": [],
+            "kind": "document",
+            "content": "hello world",
+        }
+    ]
+    assert response["analyzeResult"]["paragraphs"] == [
+        {
+            "content": "hello world",
+            "spans": [],
+            "boundingRegions": [
+                {
+                    "pageNumber": 1,
+                    "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
+                }
+            ],
+        }
+    ]
 
 
 def test_ocr_forwards_expert_enable_layout() -> None:

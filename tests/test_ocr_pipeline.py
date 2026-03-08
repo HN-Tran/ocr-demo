@@ -567,6 +567,33 @@ def test_gif_input_is_rendered_to_png_before_ollama_call() -> None:
     assert fake_client.last_image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_plain_returns_page_infos_and_page_texts() -> None:
+    fake_client = FakeOllamaClient(responses=["Zeile 1\nZeile 2"])
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            content_type="image/png",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+    assert result.page_texts == ["Zeile 1\nZeile 2"]
+    assert result.page_infos == [
+        {
+            "page_number": 1,
+            "angle": 0.0,
+            "width": 1,
+            "height": 1,
+            "unit": "pixel",
+            "kind": "document",
+            "words": [],
+            "lines": [],
+            "spans": [],
+        }
+    ]
+
+
 def test_animated_gif_plain_samples_frames_with_warning() -> None:
     fake_client = FakeOllamaClient(responses=[f"Frame {index + 1}" for index in range(8)])
     pipeline = _pipeline(fake_client)
