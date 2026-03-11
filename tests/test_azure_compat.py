@@ -111,6 +111,7 @@ class FakeBackendRouter:
                                 "label": "text_block",
                                 "content": "page one",
                                 "bbox_2d": [10.0, 10.0, 50.0, 50.0],
+                                "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
                                 "confidence": 0.93,
                             }
                         ],
@@ -123,6 +124,7 @@ class FakeBackendRouter:
                                 "label": "text_block",
                                 "content": "page two",
                                 "bbox_2d": [10.0, 10.0, 50.0, 50.0],
+                                "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
                                 "confidence": 0.87,
                             }
                         ],
@@ -226,11 +228,15 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
             pages="2",
             locale=None,
             string_index_type="unicodeCodePoint",
+            backend="expert",
+            expert_enable_layout=True,
             pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     payload = json.loads(response.body.decode("utf-8"))
 
+    assert fake_pipeline.last_call["backend"] == "expert"
+    assert fake_pipeline.last_call["expert_enable_layout"] is True
     assert fake_pipeline.last_call["mode"] == "plain"
     assert fake_pipeline.last_call["task"] == "ocr_text"
     assert response.headers["apim-request-id"]
@@ -265,7 +271,7 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                     "content": "page two",
                     "spans": [{"offset": 0, "length": 8}],
                     "confidence": 0.87,
-                    "polygon": [10.0, 10.0, 50.0, 10.0, 50.0, 50.0, 10.0, 50.0],
+                    "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
                 }
             ],
             "spans": [{"offset": 0, "length": 8}],
@@ -280,14 +286,14 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
             "boundingRegions": [
                 {
                     "pageNumber": 2,
-                    "polygon": [10.0, 10.0, 50.0, 10.0, 50.0, 50.0, 10.0, 50.0],
+                    "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
                 }
             ],
         }
     ]
 
 
-def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
+def test_sync_analyze_without_layout_keeps_word_shape_stable() -> None:
     fake_pipeline = FakeBackendRouterWithoutLayout()
     response = asyncio.run(
         compat_sync_analyze(
@@ -336,6 +342,13 @@ def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
             "content": "page one",
         }
     ]
+    assert payload["analyzeResult"]["paragraphs"] == [
+        {
+            "content": "page one",
+            "spans": [{"offset": 0, "length": 8}],
+            "boundingRegions": [],
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -349,6 +362,8 @@ async def test_async_analyze_returns_operation_location_and_result_can_be_polled
         pages=None,
         locale=None,
         string_index_type=None,
+        backend="expert",
+        expert_enable_layout=True,
         pipeline=cast(OCRBackendRouter, fake_pipeline),
         store=store,
     )
@@ -371,6 +386,8 @@ async def test_async_analyze_returns_operation_location_and_result_can_be_polled
     assert initial_poll.headers["apim-request-id"] == analyze_response.headers["apim-request-id"]
 
     await asyncio.sleep(0)
+    assert fake_pipeline.last_call["backend"] == "expert"
+    assert fake_pipeline.last_call["expert_enable_layout"] is True
     poll_response = await compat_get_analyze_result(
         modelId="prebuilt-read",
         rId=operation_id,

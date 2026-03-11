@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import importlib
+import json
 import mimetypes
 import time
 from importlib.util import find_spec
@@ -34,6 +35,64 @@ _LAYOUT_VISUALIZATION_KEYS = (
     "layout_visualizations",
     "layout_visualization_paths",
 )
+_GLMOCR_LAYOUT_MODEL_DIR = "PaddlePaddle/PP-DocLayoutV3_safetensors"
+_GLMOCR_IMAGE_LABELS = {
+    "figure",
+    "figure_caption",
+    "image",
+    "picture",
+    "illustration",
+    "chart",
+    "seal",
+    "signature",
+    "stamp",
+    "barcode",
+    "qr_code",
+}
+_GLMOCR_TABLE_LABELS = {
+    "table",
+    "table_title",
+    "table_caption",
+    "table_footnote",
+}
+_GLMOCR_FORMULA_LABELS = {
+    "formula",
+    "formula_caption",
+    "formula_number",
+    "equation_footnote",
+    "isolate_formula",
+}
+_GLMOCR_RESULT_LABEL_MAPPING = {
+    "image": sorted(_GLMOCR_IMAGE_LABELS),
+    "table": sorted(_GLMOCR_TABLE_LABELS),
+    "formula": sorted(_GLMOCR_FORMULA_LABELS),
+    "text": [
+        "abstract",
+        "algorithm",
+        "aside_text",
+        "code",
+        "content",
+        "doc_title",
+        "footer",
+        "footnote",
+        "header",
+        "list",
+        "number",
+        "opara",
+        "paragraph_title",
+        "reference",
+        "reference_content",
+        "text",
+        "text_block",
+        "title",
+        "vision_footnote",
+    ],
+}
+_GLMOCR_TASK_PROMPTS = {
+    "text": "Text Recognition:",
+    "table": "Table Recognition:",
+    "formula": "Formula Recognition:",
+}
 
 
 class GLMOCRExpertPipeline:
@@ -56,6 +115,7 @@ class GLMOCRExpertPipeline:
         self.timeout_s = timeout_s
         self.enable_layout = enable_layout
         self._parser_cache: dict[tuple[str, bool], Any] = {}
+        self._config_path_cache: dict[tuple[str, bool], Path] = {}
 
     @staticmethod
     def _load_glmocr_class() -> type[Any]:
@@ -74,18 +134,164 @@ class GLMOCRExpertPipeline:
 
         return parser_class
 
+    def _build_parser_config_payload(self, *, model: str, enable_layout: bool) -> dict[str, object]:
+        return {
+            "pipeline": {
+                "enable_layout": enable_layout,
+                "max_workers": 16,
+                "page_maxsize": 100,
+                "region_maxsize": 800,
+                "page_loader": {
+                    "max_tokens": 16384,
+                    "temperature": 0.01,
+                    "top_p": 0.00001,
+                    "top_k": 1,
+                    "repetition_penalty": 1.1,
+                    "default_prompt": (
+                        "Recognize the text in the image and output in Markdown format. "
+                        "Preserve the original layout (headings/paragraphs/tables/formulas). "
+                        "Do not fabricate content that does not exist in the image."
+                    ),
+                    "task_prompt_mapping": _GLMOCR_TASK_PROMPTS,
+                },
+                "ocr_api": {
+                    "api_host": self.ocr_api_host,
+                    "api_port": self.ocr_api_port,
+                    "api_scheme": "http",
+                    "api_path": "/api/generate",
+                    "api_mode": "ollama_generate",
+                    "model": model,
+                    "verify_ssl": False,
+                    "connect_timeout": max(1, int(self.timeout_s)),
+                    "request_timeout": max(1, int(self.timeout_s)),
+                },
+                "result_formatter": {
+                    "filter_nested": True,
+                    "min_overlap_ratio": 0.8,
+                    "output_format": "both",
+                    "label_visualization_mapping": _GLMOCR_RESULT_LABEL_MAPPING,
+                },
+                "layout": {
+                    "model_dir": _GLMOCR_LAYOUT_MODEL_DIR,
+                    "threshold": 0.4,
+                    "batch_size": 8,
+                    "workers": 1,
+                    "cuda_visible_devices": "0",
+                    "img_size": None,
+                    "layout_nms": True,
+                    "layout_unclip_ratio": [1.0, 1.0],
+                    "layout_merge_bboxes_mode": "large",
+                    "label_task_mapping": {},
+                    "id2label": None,
+                },
+            }
+        }
+
+    def _get_parser_config_path(self, *, model: str, enable_layout: bool) -> Path:
+        cache_key = (model, enable_layout)
+        cached_path = self._config_path_cache.get(cache_key)
+        if cached_path is not None and cached_path.exists():
+            return cached_path
+
+        payload = self._build_parser_config_payload(model=model, enable_layout=enable_layout)
+        with NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as temp_file:
+            json.dump(payload, temp_file, ensure_ascii=True)
+            config_path = Path(temp_file.name)
+
+        self._config_path_cache[cache_key] = config_path
+        return config_path
+
+    @staticmethod
+    def _normalize_id2label(raw_id2label: Any) -> dict[int, str] | None:
+        if not isinstance(raw_id2label, dict):
+            return None
+
+        normalized: dict[int, str] = {}
+        for raw_key, raw_value in raw_id2label.items():
+            if raw_value is None or not str(raw_value).strip():
+                continue
+            try:
+                key = int(raw_key)
+            except (TypeError, ValueError):
+                continue
+            normalized[key] = str(raw_value).strip()
+        return normalized or None
+
+    @staticmethod
+    def _classify_layout_label(label: str) -> str:
+        normalized = label.strip().lower()
+        if not normalized:
+            return "text"
+        if normalized in _GLMOCR_IMAGE_LABELS:
+            return "skip"
+        if normalized in _GLMOCR_TABLE_LABELS or "table" in normalized:
+            return "table"
+        if normalized in _GLMOCR_FORMULA_LABELS or "formula" in normalized or "equation" in normalized:
+            return "formula"
+        return "text"
+
+    @classmethod
+    def _build_layout_task_mapping(cls, id2label: dict[int, str] | None) -> dict[str, list[str]]:
+        if not id2label:
+            return {}
+
+        mapping: dict[str, list[str]] = {"text": [], "table": [], "formula": [], "skip": []}
+        for _, label in sorted(id2label.items()):
+            task_type = cls._classify_layout_label(label)
+            if label not in mapping[task_type]:
+                mapping[task_type].append(label)
+        return {task_type: labels for task_type, labels in mapping.items() if labels}
+
+    def _configure_parser_runtime(self, *, parser: Any, model: str, enable_layout: bool) -> None:
+        pipeline = getattr(parser, "_pipeline", None)
+        if pipeline is None:
+            return
+
+        ocr_client = getattr(pipeline, "ocr_client", None)
+        if ocr_client is not None:
+            api_url = f"http://{self.ocr_api_host}:{self.ocr_api_port}/api/generate"
+            for attr, value in (
+                ("api_host", self.ocr_api_host),
+                ("api_port", self.ocr_api_port),
+                ("api_scheme", "http"),
+                ("api_path", "/api/generate"),
+                ("api_url", api_url),
+                ("api_mode", "ollama_generate"),
+                ("model", model),
+            ):
+                setattr(ocr_client, attr, value)
+                if hasattr(getattr(ocr_client, "config", None), attr):
+                    setattr(ocr_client.config, attr, value)
+
+        if not enable_layout:
+            return
+
+        layout_detector = getattr(pipeline, "layout_detector", None)
+        if layout_detector is None:
+            return
+
+        id2label = self._normalize_id2label(getattr(layout_detector, "id2label", None))
+        if id2label is not None:
+            layout_detector.id2label = id2label
+
+        label_task_mapping = getattr(layout_detector, "label_task_mapping", None)
+        if not isinstance(label_task_mapping, dict) or not label_task_mapping:
+            layout_detector.label_task_mapping = self._build_layout_task_mapping(id2label)
+
     def _build_parser(self, *, model: str, enable_layout: bool) -> Any:
         parser_class = self._load_glmocr_class()
+        config_path = self._get_parser_config_path(model=model, enable_layout=enable_layout)
 
         try:
             parser = parser_class(
+                config_path=str(config_path),
                 mode=self.mode,
-                model=model,
                 ocr_api_host=self.ocr_api_host,
                 ocr_api_port=self.ocr_api_port,
                 timeout=max(1, int(self.timeout_s)),
                 enable_layout=enable_layout,
             )
+            self._configure_parser_runtime(parser=parser, model=model, enable_layout=enable_layout)
             self._enable_layout_score_preservation(parser)
             return parser
         except Exception as exc:  # noqa: BLE001
@@ -175,14 +381,143 @@ class GLMOCRExpertPipeline:
             for raw_region in raw_regions:
                 if not isinstance(raw_region, dict):
                     continue
+                raw_confidence = raw_region.get("score")
+                if raw_confidence is None:
+                    raw_confidence = raw_region.get("confidence")
                 region_scores.append(
                     (
                         cls._region_signature(raw_region),
-                        cls._coerce_confidence(raw_region.get("score") or raw_region.get("confidence")),
+                        cls._coerce_confidence(raw_confidence),
                     )
                 )
             page_scores.append(region_scores)
         return page_scores
+
+    @classmethod
+    def _collect_layout_payloads(
+        cls,
+        value: Any,
+        *,
+        max_depth: int = 6,
+        seen: set[int] | None = None,
+    ) -> list[Any]:
+        if max_depth < 0:
+            return []
+
+        if seen is None:
+            seen = set()
+
+        value_id = id(value)
+        if value_id in seen:
+            return []
+        seen.add(value_id)
+
+        payloads: list[Any] = []
+        extracted_scores = cls._extract_page_region_scores(value)
+        if extracted_scores and any(page_scores for page_scores in extracted_scores):
+            payloads.append(value)
+
+        children: list[Any] = []
+        if isinstance(value, dict):
+            children.extend(value.values())
+        elif isinstance(value, (list, tuple, set)):
+            children.extend(value)
+        else:
+            attributes = getattr(value, "__dict__", None)
+            if isinstance(attributes, dict):
+                children.extend(attributes.values())
+            if not children:
+                for name in dir(value):
+                    if name.startswith("__"):
+                        continue
+                    try:
+                        attr_value = getattr(value, name)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if callable(attr_value):
+                        continue
+                    children.append(attr_value)
+
+        for child in children:
+            payloads.extend(cls._collect_layout_payloads(child, max_depth=max_depth - 1, seen=seen))
+        return payloads
+
+    @classmethod
+    def _merge_page_score_sets(
+        cls,
+        base_scores: list[list[tuple[tuple[object, ...], float | None]]],
+        candidate_scores: list[list[tuple[tuple[object, ...], float | None]]],
+    ) -> list[list[tuple[tuple[object, ...], float | None]]]:
+        page_count = max(len(base_scores), len(candidate_scores))
+        merged_pages: list[list[tuple[tuple[object, ...], float | None]]] = []
+        for page_index in range(page_count):
+            merged_by_signature: dict[tuple[object, ...], float | None] = {}
+            ordered_signatures: list[tuple[object, ...]] = []
+            for page_scores in (base_scores, candidate_scores):
+                if page_index >= len(page_scores):
+                    continue
+                for signature, confidence in page_scores[page_index]:
+                    if signature not in merged_by_signature:
+                        ordered_signatures.append(signature)
+                        merged_by_signature[signature] = confidence
+                        continue
+
+                    existing = merged_by_signature[signature]
+                    if confidence is None:
+                        continue
+                    if existing is None or confidence > existing:
+                        merged_by_signature[signature] = confidence
+
+            merged_pages.append(
+                [(signature, merged_by_signature[signature]) for signature in ordered_signatures]
+            )
+        return merged_pages
+
+    @classmethod
+    def _extract_page_region_scores_from_parse_result(
+        cls, parse_result: Any
+    ) -> list[list[tuple[tuple[object, ...], float | None]]]:
+        combined_scores: list[list[tuple[tuple[object, ...], float | None]]] = []
+        for payload in cls._collect_layout_payloads(parse_result):
+            payload_scores = cls._extract_page_region_scores(payload)
+            if not payload_scores:
+                continue
+            combined_scores = cls._merge_page_score_sets(combined_scores, payload_scores)
+        return combined_scores
+
+    @classmethod
+    def _apply_page_region_scores_to_layout(
+        cls,
+        layout: list[dict[str, object]] | None,
+        page_scores: list[list[tuple[tuple[object, ...], float | None]]],
+    ) -> list[dict[str, object]] | None:
+        if not layout:
+            return layout
+
+        for page_index, page in enumerate(layout):
+            if not isinstance(page, dict):
+                continue
+            regions = page.get("regions")
+            if not isinstance(regions, list):
+                continue
+
+            candidate_scores = page_scores[page_index] if page_index < len(page_scores) else []
+            scores_by_signature = {
+                signature: confidence
+                for signature, confidence in candidate_scores
+                if confidence is not None
+            }
+            positional_scores = [confidence for _, confidence in candidate_scores if confidence is not None]
+
+            for region_index, region in enumerate(regions):
+                if not isinstance(region, dict):
+                    continue
+                confidence = scores_by_signature.get(cls._region_signature(region))
+                if confidence is None and region_index < len(positional_scores):
+                    confidence = positional_scores[region_index]
+                if confidence is not None:
+                    region["confidence"] = confidence
+        return layout
 
     @classmethod
     def _merge_region_scores(
@@ -200,9 +535,10 @@ class GLMOCRExpertPipeline:
             return formatted_layout
 
         for page_index, formatted_page in enumerate(formatted_pages):
-            if not isinstance(formatted_page, dict):
-                continue
-            formatted_regions = formatted_page.get("regions")
+            if isinstance(formatted_page, dict):
+                formatted_regions = formatted_page.get("regions")
+            else:
+                formatted_regions = formatted_page
             if not isinstance(formatted_regions, list):
                 continue
 
@@ -217,14 +553,13 @@ class GLMOCRExpertPipeline:
             for region_index, formatted_region in enumerate(formatted_regions):
                 if not isinstance(formatted_region, dict):
                     continue
-                if formatted_region.get("score") is not None or formatted_region.get("confidence") is not None:
-                    continue
 
                 confidence = scores_by_signature.get(cls._region_signature(formatted_region))
                 if confidence is None and region_index < len(positional_scores):
                     confidence = positional_scores[region_index]
                 if confidence is not None:
                     formatted_region["score"] = confidence
+                    formatted_region["confidence"] = confidence
 
         return formatted_layout
 
@@ -262,6 +597,20 @@ class GLMOCRExpertPipeline:
                     score_source = raw_payload
                 page_scores = cls._extract_page_region_scores(score_source)
                 formatted_layout = self._base_formatter.process(*args, **kwargs)
+
+                if (
+                    isinstance(formatted_layout, tuple)
+                    and len(formatted_layout) == 2
+                    and isinstance(formatted_layout[0], str)
+                ):
+                    json_result, markdown_result = formatted_layout
+                    try:
+                        parsed_layout = json.loads(json_result)
+                    except Exception:  # noqa: BLE001
+                        return formatted_layout
+                    merged_layout = cls._merge_region_scores(parsed_layout, page_scores)
+                    return json.dumps(merged_layout, ensure_ascii=False), markdown_result
+
                 return cls._merge_region_scores(formatted_layout, page_scores)
 
         formatter_owner.result_formatter = ScorePreservingFormatter(formatter)
@@ -295,15 +644,55 @@ class GLMOCRExpertPipeline:
             except (TypeError, ValueError):
                 pass
 
-        confidence = GLMOCRExpertPipeline._coerce_confidence(
-            region.get("confidence") or region.get("score")
-        )
+        polygon = GLMOCRExpertPipeline._normalize_polygon(region.get("polygon"))
+        if polygon is not None:
+            normalized_region["polygon"] = polygon
+            if "bbox_2d" not in normalized_region:
+                xs = polygon[0::2]
+                ys = polygon[1::2]
+                normalized_region["bbox_2d"] = [
+                    min(xs),
+                    min(ys),
+                    max(xs),
+                    max(ys),
+                ]
+
+        confidence_raw = region.get("confidence")
+        if confidence_raw is None:
+            confidence_raw = region.get("score")
+        confidence = GLMOCRExpertPipeline._coerce_confidence(confidence_raw)
         if confidence is not None:
             normalized_region["confidence"] = confidence
 
         if not normalized_region:
             return None
         return normalized_region
+
+    @staticmethod
+    def _normalize_polygon(value: Any) -> list[float] | None:
+        if not isinstance(value, (list, tuple)):
+            return None
+
+        polygon: list[float] = []
+        if value and all(isinstance(point, (int, float)) for point in value):
+            if len(value) < 8 or len(value) % 2 != 0:
+                return None
+            try:
+                polygon = [float(point) for point in value]
+            except (TypeError, ValueError):
+                return None
+            return polygon
+
+        for point in value:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                return None
+            if not all(isinstance(coordinate, (int, float)) for coordinate in point):
+                return None
+            polygon.extend((float(point[0]), float(point[1])))
+
+        if len(polygon) < 8 or len(polygon) % 2 != 0:
+            return None
+        return polygon
 
     @classmethod
     def _extract_raw_layout_pages(cls, parse_result: Any) -> list[Any] | None:
@@ -681,10 +1070,13 @@ class GLMOCRExpertPipeline:
             parse_result = parser.parse(
                 str(temp_path),
                 save_results=False,
-                save_layout_visualization=selected_enable_layout,
+                save_layout_visualization=False,
             )
 
             layout = self._extract_layout(parse_result)
+            layout = self._apply_page_region_scores_to_layout(
+                layout, self._extract_page_region_scores_from_parse_result(parse_result)
+            )
             page_infos = self._extract_page_infos(parse_result, layout=layout)
             text = self._extract_markdown(parse_result)
             layout_visualizations = (
@@ -721,6 +1113,10 @@ class GLMOCRExpertPipeline:
             if layout_visualizations:
                 warnings.append(
                     f"Expert-Layout-Visualisierung: {len(layout_visualizations)} Ansicht(en) verfügbar."
+                )
+            elif selected_enable_layout:
+                warnings.append(
+                    "Interne GLM-OCR-Layout-Visualisierung bleibt wegen einer Upstream-Inkompatibilität deaktiviert."
                 )
             warnings.append(
                 f"Expert-Backend wurde mit enable_layout={str(selected_enable_layout).lower()} ausgeführt."

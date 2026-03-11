@@ -380,6 +380,23 @@ button:disabled {
   pointer-events: none;
 }
 
+.preview-layout-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.preview-layout-shape {
+  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #ff7b54 14%, transparent);
+  fill: var(--layout-region-fill);
+  stroke: var(--layout-region-accent);
+  stroke-width: 0.25;
+  vector-effect: non-scaling-stroke;
+}
+
 .preview-layout-box {
   --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
   --layout-region-fill: color-mix(in srgb, #ff7b54 14%, transparent);
@@ -391,22 +408,27 @@ button:disabled {
   box-shadow: 0 0 0 1px rgb(17 12 9 / 20%);
 }
 
+.preview-layout-box.is-polygon {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .preview-layout-badge {
   position: absolute;
   top: 0;
   left: 0;
-  transform: translate(0.2rem, 0.2rem);
-  max-width: calc(100% - 0.4rem);
-  padding: 0.14rem 0.36rem;
-  border-radius: 999px;
+  transform: translate(0.15rem, -0.25rem);
+  max-width: min(18rem, 42vw);
+  padding: 0.18rem 0.42rem;
+  border-radius: 0.6rem;
   background: color-mix(in srgb, var(--layout-region-accent) 72%, var(--layout-region-ink) 28%);
   color: #fff;
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 18%) inset;
 }
 
 #preview-pdf.preview-media {
@@ -788,7 +810,7 @@ pre {
 
 .layout-region-head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.6rem;
   align-items: baseline;
   flex-wrap: wrap;
@@ -797,6 +819,7 @@ pre {
 .layout-region-meta {
   color: var(--muted);
   font-size: 0.76rem;
+  width: 100%;
 }
 
 .layout-region-label {
@@ -811,6 +834,18 @@ pre {
   line-height: 1.2;
 }
 
+.layout-region-confidence {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--layout-region-accent) 82%, #111 18%);
+  color: #fff;
+  font-size: 0.77rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .layout-region-content {
   margin: 0;
   color: var(--ink);
@@ -821,72 +856,84 @@ pre {
 }
 
 .preview-layout-box[data-region-kind="text"],
+.preview-layout-shape[data-region-kind="text"],
 .layout-region-item[data-region-kind="text"] {
   --layout-region-accent: color-mix(in srgb, #ef6c47 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #ef6c47 12%, transparent);
 }
 
 .preview-layout-box[data-region-kind="table"],
+.preview-layout-shape[data-region-kind="table"],
 .layout-region-item[data-region-kind="table"] {
   --layout-region-accent: color-mix(in srgb, #1b8f5a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #1b8f5a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="title"],
+.preview-layout-shape[data-region-kind="title"],
 .layout-region-item[data-region-kind="title"] {
   --layout-region-accent: color-mix(in srgb, #c95f1a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #c95f1a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="figure"],
+.preview-layout-shape[data-region-kind="figure"],
 .layout-region-item[data-region-kind="figure"] {
   --layout-region-accent: color-mix(in srgb, #2b79c2 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #2b79c2 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="caption"],
+.preview-layout-shape[data-region-kind="caption"],
 .layout-region-item[data-region-kind="caption"] {
   --layout-region-accent: color-mix(in srgb, #7d67c8 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #7d67c8 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="list"],
+.preview-layout-shape[data-region-kind="list"],
 .layout-region-item[data-region-kind="list"] {
   --layout-region-accent: color-mix(in srgb, #9b7d16 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #9b7d16 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="header"],
+.preview-layout-shape[data-region-kind="header"],
 .layout-region-item[data-region-kind="header"] {
   --layout-region-accent: color-mix(in srgb, #0c8a8a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #0c8a8a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="footer"],
+.preview-layout-shape[data-region-kind="footer"],
 .layout-region-item[data-region-kind="footer"] {
   --layout-region-accent: color-mix(in srgb, #8b6f62 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #8b6f62 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="formula"],
+.preview-layout-shape[data-region-kind="formula"],
 .layout-region-item[data-region-kind="formula"] {
   --layout-region-accent: color-mix(in srgb, #b1497f 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #b1497f 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="code"],
+.preview-layout-shape[data-region-kind="code"],
 .layout-region-item[data-region-kind="code"] {
   --layout-region-accent: color-mix(in srgb, #5753c6 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #5753c6 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="signature"],
+.preview-layout-shape[data-region-kind="signature"],
 .layout-region-item[data-region-kind="signature"] {
   --layout-region-accent: color-mix(in srgb, #b55b2d 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #b55b2d 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="other"],
+.preview-layout-shape[data-region-kind="other"],
 .layout-region-item[data-region-kind="other"] {
   --layout-region-accent: color-mix(in srgb, #6a7280 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #6a7280 12%, transparent);

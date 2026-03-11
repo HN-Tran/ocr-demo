@@ -183,6 +183,31 @@ def _bbox_to_polygon(value: object) -> list[float] | None:
     return [x1, y1, x2, y1, x2, y2, x1, y2]
 
 
+def _coerce_polygon(value: object) -> list[float] | None:
+    if not isinstance(value, (list, tuple)):
+        return None
+
+    if value and all(isinstance(point, (int, float)) for point in value):
+        if len(value) < 8 or len(value) % 2 != 0:
+            return None
+        try:
+            return [float(point) for point in value]
+        except (TypeError, ValueError):
+            return None
+
+    polygon: list[float] = []
+    for point in value:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            return None
+        if not all(isinstance(coordinate, (int, float)) for coordinate in point):
+            return None
+        polygon.extend((float(point[0]), float(point[1])))
+
+    if len(polygon) < 8 or len(polygon) % 2 != 0:
+        return None
+    return polygon
+
+
 def _bbox_to_rect(value: object) -> tuple[float, float, float, float] | None:
     if not isinstance(value, list) or len(value) != 4:
         return None
@@ -198,6 +223,23 @@ def _rect_to_polygon(*, x1: float, y1: float, x2: float, y2: float) -> list[floa
 
 def _empty_polygon() -> list[float]:
     return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def _slice_line_rect(
+    region_rect: tuple[float, float, float, float] | None,
+    *,
+    line_index: int,
+    line_count: int,
+) -> tuple[float, float, float, float] | None:
+    if region_rect is None:
+        return None
+    x1, y1, x2, y2 = region_rect
+    if line_count <= 1:
+        return x1, y1, x2, y2
+    total_height = max(y2 - y1, 0.0)
+    line_y1 = y1 + (total_height * line_index / line_count)
+    line_y2 = y1 + (total_height * (line_index + 1) / line_count)
+    return x1, line_y1, x2, line_y2
 
 
 def _split_page_paragraphs(page_text: str) -> list[str]:
@@ -309,14 +351,29 @@ def _build_line_and_word_entries(
             if not region_content:
                 continue
             region_rect = _bbox_to_rect(region.get("bbox_2d"))
-            polygon = _bbox_to_polygon(region.get("bbox_2d")) or _empty_polygon()
-            region_confidence = _default_confidence(
-                region.get("confidence") if region.get("confidence") is not None else region.get("score")
-            )
+            region_polygon = _coerce_polygon(region.get("polygon"))
+            raw_confidence = region.get("confidence")
+            if raw_confidence is None:
+                raw_confidence = region.get("score")
+            region_confidence = _default_confidence(raw_confidence)
             segments = [line.strip() for line in region_content.splitlines() if line.strip()] or [
                 region_content
             ]
-            for segment in segments:
+            for line_index, segment in enumerate(segments):
+                line_rect = _slice_line_rect(region_rect, line_index=line_index, line_count=len(segments))
+                if region_polygon is not None and len(segments) == 1:
+                    polygon = region_polygon
+                else:
+                    polygon = (
+                        _empty_polygon()
+                        if line_rect is None
+                        else _rect_to_polygon(
+                            x1=line_rect[0],
+                            y1=line_rect[1],
+                            x2=line_rect[2],
+                            y2=line_rect[3],
+                        )
+                    )
                 line_span, search_cursor = _locate_span_in_page_content(
                     page_content=page_content,
                     fragment=segment,
@@ -346,8 +403,8 @@ def _build_line_and_word_entries(
                         "confidence": region_confidence,
                         "polygon": _empty_polygon(),
                     }
-                    if region_rect is not None:
-                        x1, y1, x2, y2 = region_rect
+                    if line_rect is not None:
+                        x1, y1, x2, y2 = line_rect
                         line_width = max(x2 - x1, 0.0)
                         segment_length = max(len(segment), 1)
                         word_x1 = x1 + (line_width * word_match.start() / segment_length)
@@ -426,7 +483,7 @@ def _build_paragraph_entries_for_page(
                 "spans": [paragraph_span],
                 "boundingRegions": [],
             }
-            polygon = _bbox_to_polygon(region.get("bbox_2d"))
+            polygon = _coerce_polygon(region.get("polygon")) or _bbox_to_polygon(region.get("bbox_2d"))
             if polygon is not None:
                 paragraph["boundingRegions"] = [
                     {
@@ -799,10 +856,12 @@ async def _run_plain_ocr(
     pipeline: OCRBackendRouter,
     image_bytes: bytes,
     content_type: str,
+    backend: str | None = None,
+    expert_enable_layout: bool | None = None,
 ) -> tuple[object, str]:
     try:
         return await pipeline.run(
-            backend=None,
+            backend=backend,
             image_bytes=image_bytes,
             content_type=content_type,
             mode="plain",
@@ -812,7 +871,7 @@ async def _run_plain_ocr(
             custom_prompt=None,
             token_limit=None,
             gif_max_frames=None,
-            expert_enable_layout=None,
+            expert_enable_layout=expert_enable_layout,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -834,6 +893,8 @@ async def _execute_compat_analyze_operation(
     pipeline: OCRBackendRouter,
     image_bytes: bytes,
     content_type: str,
+    backend: str | None,
+    expert_enable_layout: bool | None,
 ) -> None:
     try:
         await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
@@ -841,6 +902,8 @@ async def _execute_compat_analyze_operation(
             pipeline=pipeline,
             image_bytes=image_bytes,
             content_type=content_type,
+            backend=backend,
+            expert_enable_layout=expert_enable_layout,
         )
         completed_at = datetime.now(timezone.utc)
         payload = _build_compat_response_payload(
@@ -1094,6 +1157,8 @@ async def compat_sync_analyze(
     pages: str | None = Query(None),
     locale: str | None = Query(None),
     string_index_type: str | None = Query(None, alias="stringIndexType"),
+    backend: str | None = Query(None),
+    expert_enable_layout: bool | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
     del locale
@@ -1108,6 +1173,8 @@ async def compat_sync_analyze(
         pipeline=pipeline,
         image_bytes=image_bytes,
         content_type=content_type,
+        backend=backend,
+        expert_enable_layout=expert_enable_layout,
     )
     completed_at = datetime.now(timezone.utc)
     return JSONResponse(
@@ -1131,6 +1198,8 @@ async def compat_analyze(
     pages: str | None = Query(None),
     locale: str | None = Query(None),
     string_index_type: str | None = Query(None, alias="stringIndexType"),
+    backend: str | None = Query(None),
+    expert_enable_layout: bool | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
 ) -> Response:
@@ -1155,6 +1224,8 @@ async def compat_analyze(
             pipeline=pipeline,
             image_bytes=image_bytes,
             content_type=content_type,
+            backend=backend,
+            expert_enable_layout=expert_enable_layout,
         )
     )
 

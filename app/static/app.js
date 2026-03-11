@@ -439,6 +439,50 @@ function formatConfidence(value) {
   return numericValue.toFixed(2);
 }
 
+function getRegionConfidence(region) {
+  if (!region || typeof region !== "object") {
+    return null;
+  }
+
+  const rawValue =
+    region.confidence !== undefined && region.confidence !== null
+      ? region.confidence
+      : region.score;
+  const numericValue = Number(rawValue);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return null;
+  }
+  return numericValue;
+}
+
+function collectLayoutConfidenceStats(layoutPages) {
+  const values = [];
+  layoutPages.forEach((page) => {
+    const regions = Array.isArray(page?.regions) ? page.regions : [];
+    regions.forEach((region) => {
+      const numericValue = getRegionConfidence(region);
+      if (numericValue !== null) {
+        values.push(numericValue);
+      }
+    });
+  });
+  if (values.length === 0) {
+    return null;
+  }
+
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return {
+    count: values.length,
+    average: total / values.length,
+    min: Math.min(...values),
+    max: Math.max(...values),
+  };
+}
+
+function getLayoutCoordinateScale(values) {
+  return Math.max(...values.map((value) => Math.abs(value))) <= 1.5 ? 1 : 1000;
+}
+
 function normalizedBboxToPercentages(bbox) {
   if (!Array.isArray(bbox) || bbox.length !== 4) {
     return null;
@@ -447,7 +491,7 @@ function normalizedBboxToPercentages(bbox) {
   if (values.some((value) => !Number.isFinite(value))) {
     return null;
   }
-  const scale = Math.max(...values) <= 1.5 ? 1 : 1000;
+  const scale = getLayoutCoordinateScale(values);
   const left = Math.max(0, Math.min(100, (values[0] / scale) * 100));
   const top = Math.max(0, Math.min(100, (values[1] / scale) * 100));
   const right = Math.max(0, Math.min(100, (values[2] / scale) * 100));
@@ -463,6 +507,66 @@ function normalizedBboxToPercentages(bbox) {
   };
 }
 
+function normalizedPolygonToPercentages(polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) {
+    return null;
+  }
+  const values = polygon.map((value) => Number(value));
+  if (values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  const scale = getLayoutCoordinateScale(values);
+  const points = [];
+  for (let index = 0; index < values.length; index += 2) {
+    points.push({
+      x: Math.max(0, Math.min(100, (values[index] / scale) * 100)),
+      y: Math.max(0, Math.min(100, (values[index + 1] / scale) * 100)),
+    });
+  }
+  return points.length >= 4 ? points : null;
+}
+
+function polygonPointsToBounds(points) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return null;
+  }
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const left = Math.max(0, Math.min(...xs));
+  const top = Math.max(0, Math.min(...ys));
+  const right = Math.min(100, Math.max(...xs));
+  const bottom = Math.min(100, Math.max(...ys));
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  return {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function getPolygonBadgeAnchors(points) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return null;
+  }
+
+  let topLeft = points[0];
+  let topRight = points[0];
+  for (const point of points) {
+    if (point.x + point.y < topLeft.x + topLeft.y) {
+      topLeft = point;
+    }
+    if (point.x - point.y > topRight.x - topRight.y) {
+      topRight = point;
+    }
+  }
+
+  return { topLeft, topRight };
+}
+
 function renderLayoutOverlay(layoutPages) {
   clearLayoutOverlay();
   const file = currentFile();
@@ -475,25 +579,55 @@ function renderLayoutOverlay(layoutPages) {
     return;
   }
 
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svgEl = document.createElementNS(svgNs, "svg");
+  svgEl.setAttribute("viewBox", "0 0 100 100");
+  svgEl.setAttribute("preserveAspectRatio", "none");
+  svgEl.classList.add("preview-layout-svg");
+  previewLayoutOverlayEl.appendChild(svgEl);
+
   let overlayCount = 0;
   firstPage.regions.forEach((region, index) => {
-    const percentages = normalizedBboxToPercentages(region.bbox_2d);
+    const polygonPoints = normalizedPolygonToPercentages(region.polygon);
+    const percentages = polygonPoints
+      ? polygonPointsToBounds(polygonPoints)
+      : normalizedBboxToPercentages(region.bbox_2d);
     if (!percentages) {
       return;
     }
 
+    const label = String(region.label || `Region ${index + 1}`);
+    const regionKind = normalizeLayoutRegionKind(label);
+
+    const shapePoints = polygonPoints || [
+      { x: percentages.left, y: percentages.top },
+      { x: percentages.left + percentages.width, y: percentages.top },
+      { x: percentages.left + percentages.width, y: percentages.top + percentages.height },
+      { x: percentages.left, y: percentages.top + percentages.height },
+    ];
+    const shapeEl = document.createElementNS(svgNs, "polygon");
+    shapeEl.classList.add("preview-layout-shape");
+    shapeEl.dataset.regionKind = regionKind;
+    shapeEl.setAttribute(
+      "points",
+      shapePoints.map((point) => `${point.x},${point.y}`).join(" ")
+    );
+    svgEl.appendChild(shapeEl);
+
     const boxEl = document.createElement("div");
     boxEl.className = "preview-layout-box";
+    if (polygonPoints) {
+      boxEl.classList.add("is-polygon");
+    }
     boxEl.style.left = `${percentages.left}%`;
     boxEl.style.top = `${percentages.top}%`;
     boxEl.style.width = `${percentages.width}%`;
     boxEl.style.height = `${percentages.height}%`;
 
-    const label = String(region.label || `Region ${index + 1}`);
-    const regionKind = normalizeLayoutRegionKind(label);
     boxEl.dataset.regionKind = regionKind;
     const contentPreview = truncateText(region.content || "", 80);
-    const confidenceLabel = formatConfidence(region.confidence);
+    const confidenceValue = getRegionConfidence(region);
+    const confidenceLabel = formatConfidence(confidenceValue);
     const labelWithConfidence = confidenceLabel ? `${label} (${confidenceLabel})` : label;
     boxEl.title = contentPreview ? `${labelWithConfidence}: ${contentPreview}` : labelWithConfidence;
 
@@ -501,6 +635,15 @@ function renderLayoutOverlay(layoutPages) {
     badgeEl.className = "preview-layout-badge";
     badgeEl.dataset.regionKind = regionKind;
     badgeEl.textContent = confidenceLabel ? `${label} ${confidenceLabel}` : label;
+    if (polygonPoints) {
+      const anchors = getPolygonBadgeAnchors(polygonPoints);
+      if (anchors && percentages.width > 0 && percentages.height > 0) {
+        const relativeLeft = ((anchors.topLeft.x - percentages.left) / percentages.width) * 100;
+        const relativeTop = ((anchors.topLeft.y - percentages.top) / percentages.height) * 100;
+        badgeEl.style.left = `${relativeLeft}%`;
+        badgeEl.style.top = `${relativeTop}%`;
+      }
+    }
     boxEl.appendChild(badgeEl);
     previewLayoutOverlayEl.appendChild(boxEl);
     overlayCount += 1;
@@ -536,10 +679,19 @@ function renderLayoutPanel(layoutPages, visualizations) {
     (total, page) => total + (Array.isArray(page.regions) ? page.regions.length : 0),
     0
   );
+  const confidenceStats = collectLayoutConfidenceStats(layoutPages);
   const summaryParts = [];
   if (layoutPages.length > 0) {
     summaryParts.push(`${layoutPages.length} Seite(n)`);
     summaryParts.push(`${regionCount} Region(en)`);
+  }
+  if (confidenceStats) {
+    summaryParts.push(
+      `Vertrauen: Ø ${formatConfidence(confidenceStats.average)}`
+    );
+    summaryParts.push(
+      `${confidenceStats.count} Score${confidenceStats.count === 1 ? "" : "s"}`
+    );
   }
   if (Array.isArray(visualizations) && visualizations.length > 0) {
     summaryParts.push(`${visualizations.length} Visualisierung(en)`);
@@ -584,11 +736,18 @@ function renderLayoutPanel(layoutPages, visualizations) {
       labelEl.textContent = label;
       regionHeadEl.appendChild(labelEl);
 
+      const confidenceLabel = formatConfidence(getRegionConfidence(region));
+      if (confidenceLabel) {
+        const confidenceEl = document.createElement("span");
+        confidenceEl.className = "layout-region-confidence";
+        confidenceEl.textContent = confidenceLabel;
+        regionHeadEl.appendChild(confidenceEl);
+      }
+
       const metaEl = document.createElement("span");
       metaEl.className = "layout-region-meta";
       const bbox = Array.isArray(region.bbox_2d) ? region.bbox_2d.join(", ") : "ohne bbox";
-      const confidenceLabel = formatConfidence(region.confidence);
-      metaEl.textContent = `#${region.index ?? regionIndex} | bbox: ${bbox}${confidenceLabel ? ` | conf: ${confidenceLabel}` : ""}`;
+      metaEl.textContent = `#${region.index ?? regionIndex} | bbox: ${bbox}`;
       regionHeadEl.appendChild(metaEl);
       regionItemEl.appendChild(regionHeadEl);
 

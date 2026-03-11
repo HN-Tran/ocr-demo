@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, cast
@@ -56,12 +57,14 @@ class _FakeParser:
         *,
         layout: list[dict[str, object]] | None = None,
         layout_visualizations: list[Any] | None = None,
+        extra_attributes: dict[str, Any] | None = None,
     ) -> None:
         self.calls = 0
         self.layout = layout
         self.layout_visualizations = layout_visualizations
         self.last_save_layout_visualization: bool | None = None
         self.markdown_result = "Expert OCR text"
+        self.extra_attributes = extra_attributes or {}
 
     def parse(
         self,
@@ -80,6 +83,7 @@ class _FakeParser:
                 "_error": None,
                 "json_result": self.layout,
                 "_layout_visualization": self.layout_visualizations,
+                **self.extra_attributes,
             },
         )()
 
@@ -197,6 +201,7 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
                         "label": "text_block",
                         "content": "Expert OCR text",
                         "bbox_2d": [100, 120, 900, 260],
+                        "polygon": [[100, 120], [880, 140], [900, 260], [120, 240]],
                         "score": 0.9834,
                     }
                 ]
@@ -236,6 +241,7 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
                     "label": "text_block",
                     "content": "Expert OCR text",
                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
                     "confidence": 0.9834,
                 }
             ],
@@ -244,6 +250,7 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
     assert result.layout_visualizations is not None
     assert len(result.layout_visualizations) == 1
     assert result.layout_visualizations[0].startswith("data:image/png;base64,")
+    assert parser.last_save_layout_visualization is False
     assert result.page_texts == ["Expert OCR text"]
     assert result.page_infos == [
         {
@@ -259,6 +266,80 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
         }
     ]
     assert any("Expert-Layout: 1 Regionen auf 1 Seite(n) erkannt." in w for w in result.warnings)
+
+
+def test_expert_recovers_region_scores_from_nested_parse_result_payload() -> None:
+    direct = _FakeDirectPipeline()
+    parser = _FakeParser(
+        layout=[
+            {
+                "page_number": 1,
+                "regions": [
+                    {
+                        "index": 0,
+                        "label": "text_block",
+                        "content": "Nested score region",
+                        "bbox_2d": [100, 120, 900, 260],
+                        "polygon": [[100, 120], [880, 140], [900, 260], [120, 240]],
+                        "confidence": 0.0,
+                    }
+                ],
+            }
+        ],
+        extra_attributes={
+            "raw_pipeline_result": {
+                "pages": [
+                    {
+                        "regions": [
+                            {
+                                "index": 0,
+                                "label": "text_block",
+                                "content": "Nested score region",
+                                "bbox_2d": [100, 120, 900, 260],
+                                "polygon": [[100, 120], [880, 140], [900, 260], [120, 240]],
+                                "score": 0.947,
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    expert = GLMOCRExpertPipeline(
+        direct_pipeline=cast(OCRPipeline, direct),
+        default_model="glm-ocr:latest",
+        mode="selfhosted",
+        ocr_api_host="localhost",
+        ocr_api_port=11434,
+        timeout_s=60.0,
+        enable_layout=True,
+    )
+    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+
+    result = asyncio.run(
+        expert.run(
+            image_bytes=_png_bytes(),
+            content_type="image/png",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+
+    assert result.layout == [
+        {
+            "page_number": 1,
+            "regions": [
+                {
+                    "index": 0,
+                    "label": "text_block",
+                    "content": "Nested score region",
+                    "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
+                    "confidence": 0.947,
+                }
+            ],
+        }
+    ]
 
 
 def test_expert_rebuilds_text_from_layout_when_markdown_is_empty_wrapper() -> None:
@@ -312,25 +393,23 @@ def test_expert_rebuilds_text_from_layout_when_markdown_is_empty_wrapper() -> No
 
 def test_enable_layout_score_preservation_wraps_result_formatter() -> None:
     class _Formatter:
-        def process(self, raw_layout: list[dict[str, object]]) -> list[dict[str, object]]:
-            formatted_pages: list[dict[str, object]] = []
+        def process(self, raw_layout: list[dict[str, object]]) -> tuple[str, str]:
+            formatted_pages: list[list[dict[str, object]]] = []
             for page in raw_layout:
                 formatted_pages.append(
-                    {
-                        "page_number": page.get("page_number", 1),
-                        "regions": [
-                            {
-                                "index": region.get("index"),
-                                "label": region.get("label"),
-                                "content": region.get("content"),
-                                "bbox_2d": region.get("bbox_2d"),
-                            }
-                            for region in page.get("regions", [])
-                            if isinstance(region, dict)
-                        ],
-                    }
+                    [
+                        {
+                            "index": region.get("index"),
+                            "label": region.get("label"),
+                            "content": region.get("content"),
+                            "bbox_2d": region.get("bbox_2d"),
+                            "confidence": 0.0,
+                        }
+                        for region in page.get("regions", [])
+                        if isinstance(region, dict)
+                    ]
                 )
-            return formatted_pages
+            return json.dumps(formatted_pages), "markdown"
 
     parser = type(
         "Parser",
@@ -342,7 +421,7 @@ def test_enable_layout_score_preservation_wraps_result_formatter() -> None:
 
     GLMOCRExpertPipeline._enable_layout_score_preservation(parser)
 
-    formatted = parser._pipeline.result_formatter.process(
+    json_result, markdown_result = parser._pipeline.result_formatter.process(
         [
             {
                 "page_number": 1,
@@ -359,7 +438,82 @@ def test_enable_layout_score_preservation_wraps_result_formatter() -> None:
         ]
     )
 
-    assert formatted[0]["regions"][0]["score"] == 0.88
+    formatted = json.loads(json_result)
+    assert markdown_result == "markdown"
+    assert formatted[0][0]["score"] == 0.88
+    assert formatted[0][0]["confidence"] == 0.88
+
+
+def test_build_parser_uses_generated_selfhosted_config() -> None:
+    captured_kwargs: dict[str, Any] = {}
+
+    class _FakeGlmOcr:
+        def __init__(self, **kwargs: Any) -> None:
+            captured_kwargs.update(kwargs)
+            self._pipeline = type(
+                "Pipeline",
+                (),
+                {
+                    "ocr_client": type(
+                        "OCRClient",
+                        (),
+                        {
+                            "config": type("Config", (), {})(),
+                            "api_mode": "openai",
+                            "api_path": "/v1/chat/completions",
+                            "api_scheme": "http",
+                            "api_host": "localhost",
+                            "api_port": 5002,
+                            "api_url": "http://localhost:5002/v1/chat/completions",
+                            "model": None,
+                        },
+                    )(),
+                    "layout_detector": type(
+                        "LayoutDetector",
+                        (),
+                        {
+                            "id2label": {0: "text_block", 1: "table", 2: "figure"},
+                            "label_task_mapping": {},
+                        },
+                    )(),
+                    "result_formatter": type("Formatter", (), {"process": lambda self, value: value})(),
+                },
+            )()
+
+    direct = _FakeDirectPipeline()
+    expert = GLMOCRExpertPipeline(
+        direct_pipeline=cast(OCRPipeline, direct),
+        default_model="glm-ocr:latest",
+        mode="selfhosted",
+        ocr_api_host="ollama",
+        ocr_api_port=11434,
+        timeout_s=60.0,
+        enable_layout=True,
+    )
+    expert._load_glmocr_class = staticmethod(lambda: _FakeGlmOcr)  # type: ignore[method-assign]
+
+    parser = expert._build_parser(model="glm-ocr:latest", enable_layout=True)
+
+    config_path = Path(captured_kwargs["config_path"])
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert captured_kwargs["mode"] == "selfhosted"
+    assert "model" not in captured_kwargs
+    assert payload["pipeline"]["ocr_api"]["model"] == "glm-ocr:latest"
+    assert payload["pipeline"]["ocr_api"]["api_mode"] == "ollama_generate"
+    assert payload["pipeline"]["ocr_api"]["api_path"] == "/api/generate"
+    assert payload["pipeline"]["layout"]["model_dir"] == "PaddlePaddle/PP-DocLayoutV3_safetensors"
+    assert payload["pipeline"]["layout"]["id2label"] is None
+    assert parser._pipeline.ocr_client.api_mode == "ollama_generate"
+    assert parser._pipeline.ocr_client.api_url == "http://ollama:11434/api/generate"
+    assert parser._pipeline.ocr_client.model == "glm-ocr:latest"
+    assert parser._pipeline.layout_detector.label_task_mapping == {
+        "text": ["text_block"],
+        "table": ["table"],
+        "skip": ["figure"],
+    }
+
+    config_path.unlink(missing_ok=True)
 
 
 def test_load_glmocr_class_reports_missing_package(monkeypatch: pytest.MonkeyPatch) -> None:

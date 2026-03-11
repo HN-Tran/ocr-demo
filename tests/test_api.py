@@ -130,6 +130,7 @@ class FakeBackendRouter:
                                     "label": "text_block",
                                     "content": "hello world",
                                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
                                     "confidence": 0.96,
                                 }
                             ],
@@ -527,6 +528,7 @@ def test_ocr_forwards_backend_choice() -> None:
                     "label": "text_block",
                     "content": "hello world",
                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
                     "confidence": 0.96,
                 }
             ],
@@ -578,7 +580,7 @@ def test_ocr_forwards_backend_choice() -> None:
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
                     "confidence": 0.96,
-                    "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
+                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
                 }
             ],
             "spans": [{"offset": 0, "length": 11}],
@@ -593,7 +595,7 @@ def test_ocr_forwards_backend_choice() -> None:
             "boundingRegions": [
                 {
                     "pageNumber": 1,
-                    "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
+                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
                 }
             ],
         }
