@@ -169,6 +169,11 @@ def _coerce_confidence(value: object) -> float | None:
     return confidence
 
 
+def _default_confidence(value: object) -> float:
+    confidence = _coerce_confidence(value)
+    return confidence if confidence is not None else 0.0
+
+
 def _bbox_to_polygon(value: object) -> list[float] | None:
     if not isinstance(value, list) or len(value) != 4:
         return None
@@ -191,6 +196,10 @@ def _rect_to_polygon(*, x1: float, y1: float, x2: float, y2: float) -> list[floa
     return [x1, y1, x2, y1, x2, y2, x1, y2]
 
 
+def _empty_polygon() -> list[float]:
+    return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
 def _split_page_paragraphs(page_text: str) -> list[str]:
     normalized = page_text.strip()
     if not normalized:
@@ -211,8 +220,8 @@ def _page_entry_base(page_info: object, page_index: int) -> dict[str, object]:
     page_entry: dict[str, object] = {
         "pageNumber": _page_number(info.get("page_number"), page_index),
         "angle": float(info["angle"]) if isinstance(info.get("angle"), (int, float)) else 0.0,
-        "width": info["width"] if isinstance(info.get("width"), (int, float)) else None,
-        "height": info["height"] if isinstance(info.get("height"), (int, float)) else None,
+        "width": info["width"] if isinstance(info.get("width"), (int, float)) else 0,
+        "height": info["height"] if isinstance(info.get("height"), (int, float)) else 0,
         "unit": info["unit"].strip()
         if isinstance(info.get("unit"), str) and info["unit"].strip()
         else "pixel",
@@ -300,8 +309,8 @@ def _build_line_and_word_entries(
             if not region_content:
                 continue
             region_rect = _bbox_to_rect(region.get("bbox_2d"))
-            polygon = _bbox_to_polygon(region.get("bbox_2d"))
-            region_confidence = _coerce_confidence(
+            polygon = _bbox_to_polygon(region.get("bbox_2d")) or _empty_polygon()
+            region_confidence = _default_confidence(
                 region.get("confidence") if region.get("confidence") is not None else region.get("score")
             )
             segments = [line.strip() for line in region_content.splitlines() if line.strip()] or [
@@ -335,7 +344,7 @@ def _build_line_and_word_entries(
                             string_index_type=string_index_type,
                         ),
                         "confidence": region_confidence,
-                        "polygon": None,
+                        "polygon": _empty_polygon(),
                     }
                     if region_rect is not None:
                         x1, y1, x2, y2 = region_rect
@@ -364,8 +373,8 @@ def _build_line_and_word_entries(
             {
                 "content": segment,
                 "spans": [line_span],
-                "confidence": None,
-                "polygon": None,
+                "confidence": 0.0,
+                "polygon": _empty_polygon(),
             }
         )
         for word_match in _WORD_RE.finditer(segment):
@@ -379,8 +388,8 @@ def _build_line_and_word_entries(
                         text=word_content,
                         string_index_type=string_index_type,
                     ),
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": _empty_polygon(),
                 }
             )
     return lines, words

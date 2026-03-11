@@ -313,22 +313,22 @@ def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
                 {
                     "content": "page",
                     "span": {"offset": 0, "length": 4},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
                 {
                     "content": "one",
                     "span": {"offset": 5, "length": 3},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
             ],
             "lines": [
                 {
                     "content": "page one",
                     "spans": [{"offset": 0, "length": 8}],
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 }
             ],
             "spans": [{"offset": 0, "length": 8}],

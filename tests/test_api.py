@@ -253,22 +253,22 @@ def test_ocr_plain() -> None:
                 {
                     "content": "hello",
                     "span": {"offset": 0, "length": 5},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
                 {
                     "content": "world",
                     "span": {"offset": 6, "length": 5},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
             ],
             "lines": [
                 {
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 }
             ],
             "spans": [{"offset": 0, "length": 11}],
@@ -619,29 +619,29 @@ def test_ocr_plain_keeps_page_shape_without_page_metadata() -> None:
         {
             "pageNumber": 1,
             "angle": 0.0,
-            "width": None,
-            "height": None,
+            "width": 0,
+            "height": 0,
             "unit": "pixel",
             "words": [
                 {
                     "content": "hello",
                     "span": {"offset": 0, "length": 5},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
                 {
                     "content": "world",
                     "span": {"offset": 6, "length": 5},
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
             ],
             "lines": [
                 {
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
-                    "confidence": None,
-                    "polygon": None,
+                    "confidence": 0.0,
+                    "polygon": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 }
             ],
             "spans": [{"offset": 0, "length": 11}],
