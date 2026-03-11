@@ -264,6 +264,7 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                 {
                     "content": "page two",
                     "spans": [{"offset": 0, "length": 8}],
+                    "confidence": 0.87,
                     "polygon": [10.0, 10.0, 50.0, 10.0, 50.0, 50.0, 10.0, 50.0],
                 }
             ],
@@ -326,6 +327,7 @@ def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
                 {
                     "content": "page one",
                     "spans": [{"offset": 0, "length": 8}],
+                    "confidence": None,
                     "polygon": None,
                 }
             ],

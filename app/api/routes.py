@@ -211,6 +211,8 @@ def _page_entry_base(page_info: object, page_index: int) -> dict[str, object]:
     page_entry: dict[str, object] = {
         "pageNumber": _page_number(info.get("page_number"), page_index),
         "angle": float(info["angle"]) if isinstance(info.get("angle"), (int, float)) else 0.0,
+        "width": info["width"] if isinstance(info.get("width"), (int, float)) else None,
+        "height": info["height"] if isinstance(info.get("height"), (int, float)) else None,
         "unit": info["unit"].strip()
         if isinstance(info.get("unit"), str) and info["unit"].strip()
         else "pixel",
@@ -221,10 +223,6 @@ def _page_entry_base(page_info: object, page_index: int) -> dict[str, object]:
         if isinstance(info.get("kind"), str) and info["kind"].strip()
         else "document",
     }
-    if isinstance(info.get("width"), (int, float)):
-        page_entry["width"] = info["width"]
-    if isinstance(info.get("height"), (int, float)):
-        page_entry["height"] = info["height"]
     return page_entry
 
 
@@ -320,6 +318,7 @@ def _build_line_and_word_entries(
                 line_entry: dict[str, object] = {
                     "content": segment,
                     "spans": [line_span],
+                    "confidence": region_confidence,
                     "polygon": polygon,
                 }
                 lines.append(line_entry)
@@ -361,7 +360,14 @@ def _build_line_and_word_entries(
             string_index_type=string_index_type,
             search_cursor=search_cursor,
         )
-        lines.append({"content": segment, "spans": [line_span], "polygon": None})
+        lines.append(
+            {
+                "content": segment,
+                "spans": [line_span],
+                "confidence": None,
+                "polygon": None,
+            }
+        )
         for word_match in _WORD_RE.finditer(segment):
             word_content = word_match.group(0)
             words.append(
@@ -406,7 +412,11 @@ def _build_paragraph_entries_for_page(
                 string_index_type=string_index_type,
                 search_cursor=search_cursor,
             )
-            paragraph: dict[str, object] = {"content": region_content, "spans": [paragraph_span]}
+            paragraph: dict[str, object] = {
+                "content": region_content,
+                "spans": [paragraph_span],
+                "boundingRegions": [],
+            }
             polygon = _bbox_to_polygon(region.get("bbox_2d"))
             if polygon is not None:
                 paragraph["boundingRegions"] = [
@@ -426,7 +436,13 @@ def _build_paragraph_entries_for_page(
             string_index_type=string_index_type,
             search_cursor=search_cursor,
         )
-        paragraphs.append({"content": paragraph_text, "spans": [paragraph_span]})
+        paragraphs.append(
+            {
+                "content": paragraph_text,
+                "spans": [paragraph_span],
+                "boundingRegions": [],
+            }
+        )
     return paragraphs
 
 
@@ -501,8 +517,8 @@ def _build_document_projection(
         page_content = cast(str, page_context["page_content"])
 
         page_entry = _page_entry_base(page_info, page_index)
+        page_entry["content"] = page_content
         if page_content:
-            page_entry["content"] = page_content
             page_entry["spans"] = [
                 _make_span(
                     offset=page_offset,

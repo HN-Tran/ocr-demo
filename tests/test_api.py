@@ -151,6 +151,41 @@ class FakeBackendRouter:
         return result, selected_backend
 
 
+class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
+    async def run(
+        self,
+        *,
+        backend: str | None,
+        image_bytes: bytes,
+        content_type: str | None,
+        mode: str,
+        schema_name: str | None,
+        model: str | None,
+        task: str | None,
+        custom_prompt: str | None,
+        token_limit: int | None,
+        gif_max_frames: int | None,
+        expert_enable_layout: bool | None,
+    ) -> Any:
+        result, selected_backend = await super().run(
+            backend=backend,
+            image_bytes=image_bytes,
+            content_type=content_type,
+            mode=mode,
+            schema_name=schema_name,
+            model=model,
+            task=task,
+            custom_prompt=custom_prompt,
+            token_limit=token_limit,
+            gif_max_frames=gif_max_frames,
+            expert_enable_layout=expert_enable_layout,
+        )
+        result.page_infos = None
+        result.layout = None
+        result.layout_visualizations = None
+        return result, selected_backend
+
+
 def _pipeline() -> OCRBackendRouter:
     return cast(OCRBackendRouter, FakeBackendRouter())
 
@@ -232,6 +267,7 @@ def test_ocr_plain() -> None:
                 {
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
+                    "confidence": None,
                     "polygon": None,
                 }
             ],
@@ -241,7 +277,11 @@ def test_ocr_plain() -> None:
         }
     ]
     assert response["analyzeResult"]["paragraphs"] == [
-        {"content": "hello world", "spans": [{"offset": 0, "length": 11}]}
+        {
+            "content": "hello world",
+            "spans": [{"offset": 0, "length": 11}],
+            "boundingRegions": [],
+        }
     ]
     assert response["analyzeResult"]["styles"] == []
     assert response["analyzeResult"]["languages"] == []
@@ -537,6 +577,7 @@ def test_ocr_forwards_backend_choice() -> None:
                 {
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
+                    "confidence": 0.96,
                     "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
                 }
             ],
@@ -555,6 +596,64 @@ def test_ocr_forwards_backend_choice() -> None:
                     "polygon": [100.0, 120.0, 900.0, 120.0, 900.0, 260.0, 100.0, 260.0],
                 }
             ],
+        }
+    ]
+
+
+def test_ocr_plain_keeps_page_shape_without_page_metadata() -> None:
+    response = asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=_png_bytes(), content_type="image/png"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, FakeBackendRouterMissingPageInfo()),
+        )
+    )
+
+    assert response["analyzeResult"]["pages"] == [
+        {
+            "pageNumber": 1,
+            "angle": 0.0,
+            "width": None,
+            "height": None,
+            "unit": "pixel",
+            "words": [
+                {
+                    "content": "hello",
+                    "span": {"offset": 0, "length": 5},
+                    "confidence": None,
+                    "polygon": None,
+                },
+                {
+                    "content": "world",
+                    "span": {"offset": 6, "length": 5},
+                    "confidence": None,
+                    "polygon": None,
+                },
+            ],
+            "lines": [
+                {
+                    "content": "hello world",
+                    "spans": [{"offset": 0, "length": 11}],
+                    "confidence": None,
+                    "polygon": None,
+                }
+            ],
+            "spans": [{"offset": 0, "length": 11}],
+            "kind": "document",
+            "content": "hello world",
+        }
+    ]
+    assert response["analyzeResult"]["paragraphs"] == [
+        {
+            "content": "hello world",
+            "spans": [{"offset": 0, "length": 11}],
+            "boundingRegions": [],
         }
     ]
 
