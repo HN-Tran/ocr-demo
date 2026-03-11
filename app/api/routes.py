@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import cast
@@ -147,6 +148,27 @@ def _page_number(value: object, fallback: int) -> int:
     return value if isinstance(value, int) and value > 0 else fallback
 
 
+def _coerce_confidence(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        confidence = float(value)
+    elif isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            confidence = float(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(confidence):
+        return None
+    if confidence < 0.0 or confidence > 1.0:
+        return None
+    return confidence
+
+
 def _bbox_to_polygon(value: object) -> list[float] | None:
     if not isinstance(value, list) or len(value) != 4:
         return None
@@ -281,6 +303,9 @@ def _build_line_and_word_entries(
                 continue
             region_rect = _bbox_to_rect(region.get("bbox_2d"))
             polygon = _bbox_to_polygon(region.get("bbox_2d"))
+            region_confidence = _coerce_confidence(
+                region.get("confidence") if region.get("confidence") is not None else region.get("score")
+            )
             segments = [line.strip() for line in region_content.splitlines() if line.strip()] or [
                 region_content
             ]
@@ -310,6 +335,7 @@ def _build_line_and_word_entries(
                             text=word_content,
                             string_index_type=string_index_type,
                         ),
+                        "confidence": region_confidence,
                         "polygon": None,
                     }
                     if region_rect is not None:
@@ -347,6 +373,7 @@ def _build_line_and_word_entries(
                         text=word_content,
                         string_index_type=string_index_type,
                     ),
+                    "confidence": None,
                     "polygon": None,
                 }
             )

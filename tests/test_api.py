@@ -218,11 +218,13 @@ def test_ocr_plain() -> None:
                 {
                     "content": "hello",
                     "span": {"offset": 0, "length": 5},
+                    "confidence": None,
                     "polygon": None,
                 },
                 {
                     "content": "world",
                     "span": {"offset": 6, "length": 5},
+                    "confidence": None,
                     "polygon": None,
                 },
             ],
@@ -503,6 +505,7 @@ def test_ocr_forwards_backend_choice() -> None:
                 {
                     "content": "hello",
                     "span": {"offset": 0, "length": 5},
+                    "confidence": 0.96,
                     "polygon": [
                         100.0,
                         120.0,
@@ -517,6 +520,7 @@ def test_ocr_forwards_backend_choice() -> None:
                 {
                     "content": "world",
                     "span": {"offset": 6, "length": 5},
+                    "confidence": 0.96,
                     "polygon": [
                         536.3636363636364,
                         120.0,

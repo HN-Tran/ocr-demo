@@ -111,6 +111,7 @@ class FakeBackendRouter:
                                 "label": "text_block",
                                 "content": "page one",
                                 "bbox_2d": [10.0, 10.0, 50.0, 50.0],
+                                "confidence": 0.93,
                             }
                         ],
                     },
@@ -122,6 +123,7 @@ class FakeBackendRouter:
                                 "label": "text_block",
                                 "content": "page two",
                                 "bbox_2d": [10.0, 10.0, 50.0, 50.0],
+                                "confidence": 0.87,
                             }
                         ],
                     },
@@ -248,11 +250,13 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                 {
                     "content": "page",
                     "span": {"offset": 0, "length": 4},
+                    "confidence": 0.87,
                     "polygon": [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
                 },
                 {
                     "content": "two",
                     "span": {"offset": 5, "length": 3},
+                    "confidence": 0.87,
                     "polygon": [35.0, 10.0, 50.0, 10.0, 50.0, 50.0, 35.0, 50.0],
                 },
             ],
@@ -308,11 +312,13 @@ def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
                 {
                     "content": "page",
                     "span": {"offset": 0, "length": 4},
+                    "confidence": None,
                     "polygon": None,
                 },
                 {
                     "content": "one",
                     "span": {"offset": 5, "length": 3},
+                    "confidence": None,
                     "polygon": None,
                 },
             ],
