@@ -637,6 +637,91 @@ def _build_document_projection(
     return pages, paragraphs
 
 
+def _build_tables(
+    layout: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    """Extract Azure-compatible ``tables`` array from layout regions that have cells."""
+    if not layout:
+        return []
+    tables: list[dict[str, object]] = []
+    # Layout may be a flat list (single page) or nested per page.
+    all_regions: list[tuple[int, dict[str, object]]] = []
+    if layout and isinstance(layout[0], dict):
+        # Single-page flat list of regions.
+        for region in layout:
+            if isinstance(region, dict):
+                all_regions.append((1, region))
+    elif layout and isinstance(layout[0], list):
+        # Multi-page: list of lists.
+        for page_idx, page_regions in enumerate(layout):
+            if isinstance(page_regions, list):
+                for region in page_regions:
+                    if isinstance(region, dict):
+                        all_regions.append((page_idx + 1, region))
+
+    for page_number, region in all_regions:
+        cells_raw = region.get("cells")
+        if not isinstance(cells_raw, list) or not cells_raw:
+            continue
+        row_count = 0
+        col_count = 0
+        azure_cells: list[dict[str, object]] = []
+        for cell in cells_raw:
+            if not isinstance(cell, dict):
+                continue
+            row_idx = cell.get("row", 0)
+            col_idx = cell.get("column", 0)
+            row_span = cell.get("row_span", 1)
+            col_span = cell.get("col_span", 1)
+            if not isinstance(row_idx, int):
+                row_idx = 0
+            if not isinstance(col_idx, int):
+                col_idx = 0
+            if not isinstance(row_span, int) or row_span < 1:
+                row_span = 1
+            if not isinstance(col_span, int) or col_span < 1:
+                col_span = 1
+            row_count = max(row_count, row_idx + row_span)
+            col_count = max(col_count, col_idx + col_span)
+            cell_content = str(cell.get("content") or "")
+            is_header = bool(cell.get("is_header", False))
+            azure_cell: dict[str, object] = {
+                "kind": "columnHeader" if is_header else "content",
+                "rowIndex": row_idx,
+                "columnIndex": col_idx,
+                "rowSpan": row_span,
+                "columnSpan": col_span,
+                "content": cell_content,
+            }
+            polygon = _coerce_polygon(cell.get("polygon")) or _bbox_to_polygon(
+                cell.get("bbox_2d")
+            )
+            if polygon is not None:
+                azure_cell["boundingRegions"] = [
+                    {"pageNumber": page_number, "polygon": polygon}
+                ]
+            else:
+                azure_cell["boundingRegions"] = []
+            azure_cells.append(azure_cell)
+        tables.append(
+            {
+                "rowCount": row_count,
+                "columnCount": col_count,
+                "cells": azure_cells,
+                "boundingRegions": [],
+            }
+        )
+        # Add table-level bounding region from the parent region.
+        table_polygon = _coerce_polygon(region.get("polygon")) or _bbox_to_polygon(
+            region.get("bbox_2d")
+        )
+        if table_polygon is not None:
+            tables[-1]["boundingRegions"] = [
+                {"pageNumber": page_number, "polygon": table_polygon}
+            ]
+    return tables
+
+
 def _build_analyze_result(
     *,
     content: str,
@@ -654,12 +739,14 @@ def _build_analyze_result(
         content=content,
         string_index_type=string_index_type,
     )
+    tables = _build_tables(layout)
     return {
         "apiVersion": api_version,
         "modelId": model_id,
         "stringIndexType": string_index_type,
         "content": content,
         "pages": pages,
+        "tables": tables,
         "paragraphs": paragraphs,
         "styles": [],
         "languages": [],

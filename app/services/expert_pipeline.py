@@ -1076,6 +1076,19 @@ class GLMOCRExpertPipeline:
         return cls._classify_layout_label(label) == "table"
 
     @staticmethod
+    def _strip_table_markup(text: str) -> str:
+        """Return plain text from HTML or markdown table markup."""
+        import re
+        from html import unescape
+
+        # Strip HTML tags, decode entities, collapse whitespace.
+        cleaned = re.sub(r"<[^>]+>", " ", text)
+        cleaned = unescape(cleaned)
+        # Collapse runs of whitespace (but keep newlines for readability).
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in cleaned.splitlines()]
+        return "\n".join(line for line in lines if line)
+
+    @staticmethod
     def _parse_table_content(text: str) -> list[list[str]]:
         """Parse a table (HTML or markdown) into a list of rows, each a list of cell strings."""
         import re
@@ -1233,6 +1246,9 @@ class GLMOCRExpertPipeline:
                     content = str(region.get("content") or "")
                     if content:
                         self._fill_cell_texts(cells, content)
+                        # Replace raw HTML/markdown with plain text now
+                        # that structured cells carry the content.
+                        region["content"] = self._strip_table_markup(content)
                     region["cells"] = cells
                 except Exception as _exc:  # noqa: BLE001
                     logger.warning(
