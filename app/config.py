@@ -69,9 +69,9 @@ def get_settings() -> Settings:
     default_expert_host = parsed_ollama_url.hostname or "localhost"
     default_expert_port = parsed_ollama_url.port or 11434
 
-    ocr_backend = os.getenv("OCR_BACKEND", "direct").strip().lower()
+    ocr_backend = os.getenv("OCR_BACKEND", "expert").strip().lower()
     if ocr_backend not in {"direct", "expert"}:
-        ocr_backend = "direct"
+        ocr_backend = "expert"
 
     ocr_expert_mode = os.getenv("OCR_EXPERT_MODE", "selfhosted").strip().lower()
     if ocr_expert_mode != "selfhosted":
