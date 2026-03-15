@@ -644,20 +644,18 @@ def _build_tables(
     if not layout:
         return []
     tables: list[dict[str, object]] = []
-    # Layout may be a flat list (single page) or nested per page.
+    # Layout is a list of per-page dicts, each with a "regions" key.
     all_regions: list[tuple[int, dict[str, object]]] = []
-    if layout and isinstance(layout[0], dict):
-        # Single-page flat list of regions.
-        for region in layout:
+    for page_idx, page in enumerate(layout):
+        if not isinstance(page, dict):
+            continue
+        page_number = int(page.get("page_number", page_idx + 1) or page_idx + 1)
+        regions = page.get("regions")
+        if not isinstance(regions, list):
+            continue
+        for region in regions:
             if isinstance(region, dict):
-                all_regions.append((1, region))
-    elif layout and isinstance(layout[0], list):
-        # Multi-page: list of lists.
-        for page_idx, page_regions in enumerate(layout):
-            if isinstance(page_regions, list):
-                for region in page_regions:
-                    if isinstance(region, dict):
-                        all_regions.append((page_idx + 1, region))
+                all_regions.append((page_number, region))
 
     for page_number, region in all_regions:
         cells_raw = region.get("cells")
