@@ -1246,6 +1246,7 @@ async def ocr(
         "markdown": result.markdown,
         "structured": result.structured,
         "layout": result.layout,
+        "tables": analyze_result.get("tables", []),
         "layout_visualizations": result.layout_visualizations,
         "model": result.model,
         "mode": result.mode,
