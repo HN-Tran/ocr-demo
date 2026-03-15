@@ -53,7 +53,10 @@ class FakeRequest:
 
 
 def _request(
-    *, body: bytes = b"", content_type: str | None = None, query_params: dict[str, str] | None = None
+    *,
+    body: bytes = b"",
+    content_type: str | None = None,
+    query_params: dict[str, str] | None = None,
 ) -> Request:
     return cast(
         Request,
@@ -80,6 +83,7 @@ class FakeBackendRouter:
         token_limit: int | None,
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
+        expert_layout_model: str | None = None,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -94,6 +98,7 @@ class FakeBackendRouter:
             "token_limit": token_limit,
             "gif_max_frames": gif_max_frames,
             "expert_enable_layout": expert_enable_layout,
+            "expert_layout_model": expert_layout_model,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
@@ -103,7 +108,9 @@ class FakeBackendRouter:
             {
                 "text": "hello world",
                 "markdown": (
-                    "# Dokument\n\nhello world" if selected_backend == "expert" and mode == "plain" else None
+                    "# Dokument\n\nhello world"
+                    if selected_backend == "expert" and mode == "plain"
+                    else None
                 ),
                 "structured": {"vendor": "ACME"} if mode == "structured" else None,
                 "page_infos": [
@@ -130,7 +137,16 @@ class FakeBackendRouter:
                                     "label": "text_block",
                                     "content": "hello world",
                                     "bbox_2d": [100.0, 120.0, 900.0, 260.0],
-                                    "polygon": [100.0, 120.0, 880.0, 140.0, 900.0, 260.0, 120.0, 240.0],
+                                    "polygon": [
+                                        100.0,
+                                        120.0,
+                                        880.0,
+                                        140.0,
+                                        900.0,
+                                        260.0,
+                                        120.0,
+                                        240.0,
+                                    ],
                                     "confidence": 0.96,
                                 }
                             ],
@@ -167,6 +183,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         token_limit: int | None,
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
+        expert_layout_model: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -180,6 +197,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
         result.page_infos = None
         result.layout = None

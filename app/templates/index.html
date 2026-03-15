@@ -154,6 +154,20 @@
             </label>
 
             <label>
+              Dev: Layout-Modell
+              <select id="expert_layout_model" name="expert_layout_model">
+                <option value="" selected>Standard ({{ default_expert_layout_model }})</option>
+                <option value="pascalrai/Deformable-DETR-Document-Layout-Analysis">Deformable DETR (DocLayNet, mAP 0.61)</option>
+                <option value="Aryn/deformable-detr-DocLayNet">Deformable DETR Aryn (DocLayNet)</option>
+                <option value="docling-project/docling-layout-heron">Docling Heron (RT-DETRv2)</option>
+                <option value="docling-project/docling-layout-heron-101">Docling Heron 101</option>
+              </select>
+              <span class="hint">
+                Layout-Erkennungsmodell für Dev-Modus. PP-DocLayout nutzt die interne GLM-OCR-Erkennung; andere HF-Modelle (AutoModelForObjectDetection) verwenden den generischen Detektor.
+              </span>
+            </label>
+
+            <label>
               Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>

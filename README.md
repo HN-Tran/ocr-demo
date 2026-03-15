@@ -31,6 +31,7 @@ export OLLAMA_MODEL="glm-ocr:latest"
 export OCR_BACKEND="direct" # direct | expert
 export OCR_EXPERT_MODE="selfhosted"
 export OCR_EXPERT_ENABLE_LAYOUT="true"
+export OCR_EXPERT_LAYOUT_MODEL="PaddlePaddle/PP-DocLayoutV3_safetensors"
 export OCR_EXPERT_OCR_API_HOST="localhost"
 export OCR_EXPERT_OCR_API_PORT="11434"
 export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
@@ -118,6 +119,19 @@ Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Story
 Hinweis: `backend=expert` nutzt GLM-OCR primär für `mode=plain` + `task=ocr_text`; für andere Aufgaben fällt die App auf den Direct-Pfad zurück.
 Hinweis: Expert/Dev läuft in dieser App nur im Self-Hosted-Modus (`OCR_EXPERT_MODE=selfhosted`).
 Hinweis: Bei `backend=expert` kann die Antwort zusätzlich `markdown` enthalten; die UI rendert daraus eine sichere Vorschau, behält aber `text` als Rohausgabe bei.
+Hinweis: Das Layout-Modell ist über `OCR_EXPERT_LAYOUT_MODEL` konfigurierbar (Standard: `PaddlePaddle/PP-DocLayoutV3_safetensors`) und kann pro Request via `expert_layout_model` überschrieben werden. PP-DocLayout-Modelle werden direkt von GLM-OCR geladen. Für andere HuggingFace-Object-Detection-Modelle wird automatisch ein generischer Detektor (`HFLayoutDetector`) verwendet, der `AutoModelForObjectDetection` nutzt. YOLO-basierte Modelle werden nicht unterstützt.
+
+Verfügbare Layout-Modelle:
+
+| Modell | Architektur | Polygone | Stärken | Einschränkungen |
+|---|---|---|---|---|
+| `PaddlePaddle/PP-DocLayoutV3_safetensors` (Standard) | PP-DocLayout V3 mit Instanz-Segmentierung (nativ in GLM-OCR) | Echte Polygone aus Segmentierungsmasken, variable Punktanzahl, konturgetreu | Beste Genauigkeit für nicht-planare Dokumente (schräg, gebogen, Handyfoto), viele Kategorien, Lesereihenfolge | Nur über GLM-OCR-Pipeline nutzbar |
+
+| `pascalrai/Deformable-DETR-Document-Layout-Analysis` | Deformable DETR (reine Objekterkennung, keine Segmentierung) | Nur achsenparallele Bounding-Boxen (4-Punkt-Rechtecke) | Trainiert auf DocLayNet (mAP 0.61), gute Tabellen-/Texterkennung | Benötigt `timm`; keine echten Polygone möglich (architekturbedingt) |
+| `Aryn/deformable-detr-DocLayNet` | Deformable DETR (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Trainiert auf DocLayNet, alternative Gewichtung | Benötigt `timm`; keine echten Polygone möglich |
+| `docling-project/docling-layout-heron` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Schnelle Inferenz | Erkennt gescannte Seiten oft als einzelne „Picture"-Region; keine echten Polygone möglich |
+| `docling-project/docling-layout-heron-101` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Größere Variante von Heron | Gleiche Einschränkungen wie Heron |
+Hinweis: Für erkannte Tabellenregionen wird automatisch eine Zellstruktur-Erkennung via Microsoft Table Transformer (`table-transformer-structure-recognition-v1.1-all`) durchgeführt. Die erkannten Zellen (Zeilen × Spalten, Header, Spanning Cells) werden als `cells`-Array in der jeweiligen Layout-Region zurückgegeben.
 
 Response-Format:
 

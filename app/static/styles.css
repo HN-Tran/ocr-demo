@@ -855,6 +855,42 @@ pre {
   word-break: break-word;
 }
 
+.layout-cells-wrap {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+}
+.layout-cells-wrap summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 500;
+}
+.layout-cells-grid {
+  margin-top: 0.3rem;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  width: 100%;
+  table-layout: fixed;
+}
+.layout-cells-grid th,
+.layout-cells-grid td {
+  border: 1px solid var(--border, #ccc);
+  padding: 0.15rem 0.25rem;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 1rem;
+}
+.layout-cells-grid th {
+  background: var(--accent, #259e73);
+  color: #fff;
+  font-weight: 600;
+}
+.layout-cells-grid .layout-cell-span {
+  background: color-mix(in srgb, var(--accent, #259e73) 40%, transparent);
+  font-weight: 600;
+}
+
 .preview-layout-box[data-region-kind="text"],
 .preview-layout-shape[data-region-kind="text"],
 .layout-region-item[data-region-kind="text"] {

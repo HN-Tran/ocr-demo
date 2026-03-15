@@ -38,6 +38,7 @@ class _FakeDirectPipeline:
         token_limit: int | None = None,
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
+        expert_layout_model: str | None = None,
     ) -> OCRResult:
         self.calls += 1
         return OCRResult(
@@ -126,7 +127,7 @@ def test_expert_uses_glm_parser_for_plain_ocr_text() -> None:
         timeout_s=60.0,
         enable_layout=True,
     )
-    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+    expert._get_parser = lambda *, model, enable_layout, layout_model: parser  # type: ignore[method-assign]
 
     result = asyncio.run(
         expert.run(
@@ -157,7 +158,7 @@ def test_expert_respects_layout_override() -> None:
     )
     selected_layout_values: list[bool] = []
 
-    def _fake_get_parser(*, model: str, enable_layout: bool) -> _FakeParser:
+    def _fake_get_parser(*, model: str, enable_layout: bool, layout_model: str) -> _FakeParser:
         selected_layout_values.append(enable_layout)
         return parser
 
@@ -204,7 +205,7 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
                         "polygon": [[100, 120], [880, 140], [900, 260], [120, 240]],
                         "score": 0.9834,
                     }
-                ]
+                ],
             }
         ],
         layout_visualizations=[vis_path],
@@ -218,7 +219,7 @@ def test_expert_returns_layout_pages_and_visualizations() -> None:
         timeout_s=60.0,
         enable_layout=True,
     )
-    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+    expert._get_parser = lambda *, model, enable_layout, layout_model: parser  # type: ignore[method-assign]
 
     try:
         result = asyncio.run(
@@ -314,7 +315,7 @@ def test_expert_recovers_region_scores_from_nested_parse_result_payload() -> Non
         timeout_s=60.0,
         enable_layout=True,
     )
-    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+    expert._get_parser = lambda *, model, enable_layout, layout_model: parser  # type: ignore[method-assign]
 
     result = asyncio.run(
         expert.run(
@@ -375,7 +376,7 @@ def test_expert_rebuilds_text_from_layout_when_markdown_is_empty_wrapper() -> No
         timeout_s=60.0,
         enable_layout=True,
     )
-    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+    expert._get_parser = lambda *, model, enable_layout, layout_model: parser  # type: ignore[method-assign]
 
     result = asyncio.run(
         expert.run(
@@ -476,7 +477,9 @@ def test_build_parser_uses_generated_selfhosted_config() -> None:
                             "label_task_mapping": {},
                         },
                     )(),
-                    "result_formatter": type("Formatter", (), {"process": lambda self, value: value})(),
+                    "result_formatter": type(
+                        "Formatter", (), {"process": lambda self, value: value}
+                    )(),
                 },
             )()
 
@@ -492,7 +495,11 @@ def test_build_parser_uses_generated_selfhosted_config() -> None:
     )
     expert._load_glmocr_class = staticmethod(lambda: _FakeGlmOcr)  # type: ignore[method-assign]
 
-    parser = expert._build_parser(model="glm-ocr:latest", enable_layout=True)
+    parser = expert._build_parser(
+        model="glm-ocr:latest",
+        enable_layout=True,
+        layout_model="PaddlePaddle/PP-DocLayoutV3_safetensors",
+    )
 
     config_path = Path(captured_kwargs["config_path"])
     payload = json.loads(config_path.read_text(encoding="utf-8"))

@@ -28,6 +28,7 @@ class _FakeService:
         token_limit: int | None = None,
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
+        expert_layout_model: str | None = None,
     ) -> OCRResult:
         self.calls += 1
         return OCRResult(

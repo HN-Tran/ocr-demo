@@ -7,6 +7,7 @@ const customPromptEl = document.getElementById("custom_prompt");
 const schemaNameEl = document.getElementById("schema_name");
 const backendEl = document.getElementById("backend");
 const expertEnableLayoutEl = document.getElementById("expert_enable_layout");
+const expertLayoutModelEl = document.getElementById("expert_layout_model");
 const modelEl = document.getElementById("model");
 const tokenLimitEl = document.getElementById("token_limit");
 const gifMaxFramesEl = document.getElementById("gif_max_frames");
@@ -758,6 +759,48 @@ function renderLayoutPanel(layoutPages, visualizations) {
         regionItemEl.appendChild(contentEl);
       }
 
+      if (Array.isArray(region.cells) && region.cells.length > 0) {
+        const cellsWrap = document.createElement("details");
+        cellsWrap.className = "layout-cells-wrap";
+        const cellsSummary = document.createElement("summary");
+        const headerCount = region.cells.filter((c) => c.is_header).length;
+        const maxRow = Math.max(...region.cells.map((c) => c.row));
+        const maxCol = Math.max(...region.cells.map((c) => c.column));
+        const rows = maxRow + 1;
+        const cols = maxCol + 1;
+        let summaryText = `Tabellenstruktur: ${rows} Zeilen × ${cols} Spalten`;
+        if (headerCount) summaryText += ` (${headerCount} Header-Zellen)`;
+        cellsSummary.textContent = summaryText;
+        cellsWrap.appendChild(cellsSummary);
+
+        const grid = document.createElement("table");
+        grid.className = "layout-cells-grid";
+        const cellMap = new Map();
+        for (const cell of region.cells) {
+          cellMap.set(`${cell.row},${cell.column}`, cell);
+        }
+        for (let r = 0; r <= maxRow; r++) {
+          const tr = document.createElement("tr");
+          for (let c = 0; c <= maxCol; c++) {
+            const cell = cellMap.get(`${r},${c}`);
+            const td = document.createElement(cell && cell.is_header ? "th" : "td");
+            if (cell) {
+              const cb = Array.isArray(cell.bbox_2d) ? cell.bbox_2d : [];
+              const bboxStr = cb.map((v) => Math.round(v)).join(", ");
+              td.title = `Zeile ${r + 1}, Spalte ${c + 1} | bbox: ${bboxStr}`;
+              td.textContent = cell.content || "";
+              if (cell.row_span > 1 || cell.col_span > 1) {
+                td.classList.add("layout-cell-span");
+              }
+            }
+            tr.appendChild(td);
+          }
+          grid.appendChild(tr);
+        }
+        cellsWrap.appendChild(grid);
+        regionItemEl.appendChild(cellsWrap);
+      }
+
       regionListEl.appendChild(regionItemEl);
     });
 
@@ -833,6 +876,12 @@ function buildPayload() {
     payload.set("expert_enable_layout", expertLayoutValue);
   } else {
     payload.delete("expert_enable_layout");
+  }
+  const expertLayoutModelValue = String(payload.get("expert_layout_model") || "").trim();
+  if (expertLayoutModelValue) {
+    payload.set("expert_layout_model", expertLayoutModelValue);
+  } else {
+    payload.delete("expert_layout_model");
   }
   if (!payload.get("model")) {
     payload.delete("model");
@@ -1542,6 +1591,9 @@ backendEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
 expertEnableLayoutEl.addEventListener("change", () => {
+  setAdvancedDirty(true);
+});
+expertLayoutModelEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
 modelEl.addEventListener("input", () => {

@@ -4,12 +4,15 @@ import base64
 import copy
 import importlib
 import json
+import logging
 import mimetypes
 import time
 from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+
+from PIL import Image
 
 from app.services.ocr_pipeline import (
     PLAIN_TASK_OCR_TEXT,
@@ -18,6 +21,8 @@ from app.services.ocr_pipeline import (
     normalize_ocr_text_output,
 )
 from app.services.ollama_client import OllamaError
+
+logger = logging.getLogger(__name__)
 
 _CONTENT_TYPE_SUFFIX_MAP = {
     "application/pdf": ".pdf",
@@ -35,7 +40,7 @@ _LAYOUT_VISUALIZATION_KEYS = (
     "layout_visualizations",
     "layout_visualization_paths",
 )
-_GLMOCR_LAYOUT_MODEL_DIR = "PaddlePaddle/PP-DocLayoutV3_safetensors"
+_DEFAULT_LAYOUT_MODEL = "PaddlePaddle/PP-DocLayoutV3_safetensors"
 _GLMOCR_IMAGE_LABELS = {
     "figure",
     "figure_caption",
@@ -48,12 +53,14 @@ _GLMOCR_IMAGE_LABELS = {
     "stamp",
     "barcode",
     "qr_code",
+    "Picture",
 }
 _GLMOCR_TABLE_LABELS = {
     "table",
     "table_title",
     "table_caption",
     "table_footnote",
+    "Table",
 }
 _GLMOCR_FORMULA_LABELS = {
     "formula",
@@ -61,6 +68,7 @@ _GLMOCR_FORMULA_LABELS = {
     "formula_number",
     "equation_footnote",
     "isolate_formula",
+    "Formula",
 }
 _GLMOCR_RESULT_LABEL_MAPPING = {
     "image": sorted(_GLMOCR_IMAGE_LABELS),
@@ -86,6 +94,21 @@ _GLMOCR_RESULT_LABEL_MAPPING = {
         "text_block",
         "title",
         "vision_footnote",
+        # Docling Heron labels
+        "Caption",
+        "Checkbox-Selected",
+        "Checkbox-Unselected",
+        "Code",
+        "Document Index",
+        "Footnote",
+        "Form",
+        "Key-Value Region",
+        "List-item",
+        "Page-footer",
+        "Page-header",
+        "Section-header",
+        "Text",
+        "Title",
     ],
 }
 _GLMOCR_TASK_PROMPTS = {
@@ -106,6 +129,7 @@ class GLMOCRExpertPipeline:
         ocr_api_port: int,
         timeout_s: float,
         enable_layout: bool,
+        layout_model: str = "",
     ) -> None:
         self.direct_pipeline = direct_pipeline
         self.default_model = default_model
@@ -114,8 +138,10 @@ class GLMOCRExpertPipeline:
         self.ocr_api_port = ocr_api_port
         self.timeout_s = timeout_s
         self.enable_layout = enable_layout
-        self._parser_cache: dict[tuple[str, bool], Any] = {}
-        self._config_path_cache: dict[tuple[str, bool], Path] = {}
+        self.layout_model = layout_model.strip() if layout_model else _DEFAULT_LAYOUT_MODEL
+        self._parser_cache: dict[tuple[str, bool, str], Any] = {}
+        self._config_path_cache: dict[tuple[str, bool, str], Path] = {}
+        self._table_recognizer: Any = None
 
     @staticmethod
     def _load_glmocr_class() -> type[Any]:
@@ -134,7 +160,9 @@ class GLMOCRExpertPipeline:
 
         return parser_class
 
-    def _build_parser_config_payload(self, *, model: str, enable_layout: bool) -> dict[str, object]:
+    def _build_parser_config_payload(
+        self, *, model: str, enable_layout: bool, layout_model: str
+    ) -> dict[str, object]:
         return {
             "pipeline": {
                 "enable_layout": enable_layout,
@@ -172,7 +200,7 @@ class GLMOCRExpertPipeline:
                     "label_visualization_mapping": _GLMOCR_RESULT_LABEL_MAPPING,
                 },
                 "layout": {
-                    "model_dir": _GLMOCR_LAYOUT_MODEL_DIR,
+                    "model_dir": layout_model,
                     "threshold": 0.4,
                     "batch_size": 8,
                     "workers": 1,
@@ -187,14 +215,20 @@ class GLMOCRExpertPipeline:
             }
         }
 
-    def _get_parser_config_path(self, *, model: str, enable_layout: bool) -> Path:
-        cache_key = (model, enable_layout)
+    def _get_parser_config_path(
+        self, *, model: str, enable_layout: bool, layout_model: str
+    ) -> Path:
+        cache_key = (model, enable_layout, layout_model)
         cached_path = self._config_path_cache.get(cache_key)
         if cached_path is not None and cached_path.exists():
             return cached_path
 
-        payload = self._build_parser_config_payload(model=model, enable_layout=enable_layout)
-        with NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as temp_file:
+        payload = self._build_parser_config_payload(
+            model=model, enable_layout=enable_layout, layout_model=layout_model
+        )
+        with NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as temp_file:
             json.dump(payload, temp_file, ensure_ascii=True)
             config_path = Path(temp_file.name)
 
@@ -222,11 +256,20 @@ class GLMOCRExpertPipeline:
         normalized = label.strip().lower()
         if not normalized:
             return "text"
-        if normalized in _GLMOCR_IMAGE_LABELS:
+        if label in _GLMOCR_IMAGE_LABELS or normalized in _GLMOCR_IMAGE_LABELS:
             return "skip"
-        if normalized in _GLMOCR_TABLE_LABELS or "table" in normalized:
+        if (
+            label in _GLMOCR_TABLE_LABELS
+            or normalized in _GLMOCR_TABLE_LABELS
+            or "table" in normalized
+        ):
             return "table"
-        if normalized in _GLMOCR_FORMULA_LABELS or "formula" in normalized or "equation" in normalized:
+        if (
+            label in _GLMOCR_FORMULA_LABELS
+            or normalized in _GLMOCR_FORMULA_LABELS
+            or "formula" in normalized
+            or "equation" in normalized
+        ):
             return "formula"
         return "text"
 
@@ -278,9 +321,27 @@ class GLMOCRExpertPipeline:
         if not isinstance(label_task_mapping, dict) or not label_task_mapping:
             layout_detector.label_task_mapping = self._build_layout_task_mapping(id2label)
 
-    def _build_parser(self, *, model: str, enable_layout: bool) -> Any:
+    @staticmethod
+    def _needs_custom_layout_detector(layout_model: str) -> bool:
+        """Check if the model requires our generic HF detector instead of PP-DocLayout."""
+        normalized = layout_model.strip().lower()
+        return "pp-doclayout" not in normalized and "ppdoclayout" not in normalized
+
+    def _build_parser(self, *, model: str, enable_layout: bool, layout_model: str) -> Any:
         parser_class = self._load_glmocr_class()
-        config_path = self._get_parser_config_path(model=model, enable_layout=enable_layout)
+        use_custom_detector = enable_layout and self._needs_custom_layout_detector(layout_model)
+
+        if use_custom_detector:
+            # Build parser with layout disabled to prevent PPDocLayoutDetector from
+            # loading (it would fail with an architecture mismatch). We inject our
+            # HFLayoutDetector afterwards and re-enable layout on the pipeline.
+            config_path = self._get_parser_config_path(
+                model=model, enable_layout=False, layout_model=layout_model
+            )
+        else:
+            config_path = self._get_parser_config_path(
+                model=model, enable_layout=enable_layout, layout_model=layout_model
+            )
 
         try:
             parser = parser_class(
@@ -289,19 +350,55 @@ class GLMOCRExpertPipeline:
                 ocr_api_host=self.ocr_api_host,
                 ocr_api_port=self.ocr_api_port,
                 timeout=max(1, int(self.timeout_s)),
-                enable_layout=enable_layout,
+                enable_layout=not use_custom_detector and enable_layout,
             )
+
+            if use_custom_detector:
+                self._inject_custom_layout_detector(parser, layout_model=layout_model)
+
             self._configure_parser_runtime(parser=parser, model=model, enable_layout=enable_layout)
             self._enable_layout_score_preservation(parser)
             return parser
         except Exception as exc:  # noqa: BLE001
             raise OllamaError(f"Expert-Backend konnte nicht initialisiert werden: {exc}") from exc
 
-    def _get_parser(self, *, model: str, enable_layout: bool) -> Any:
-        cache_key = (model, enable_layout)
+    def _inject_custom_layout_detector(self, parser: Any, *, layout_model: str) -> None:
+        """Replace the pipeline's layout detector with our generic HF detector."""
+        from app.services.layout_detector import HFLayoutDetector
+
+        pipeline = getattr(parser, "_pipeline", None)
+        if pipeline is None:
+            raise OllamaError(
+                "Expert-Backend Pipeline nicht gefunden; "
+                "benutzerdefinierter Layout-Detektor kann nicht injiziert werden."
+            )
+
+        layout_config = getattr(pipeline, "config", None)
+        layout_config = getattr(layout_config, "layout", None)
+        if layout_config is None:
+            from glmocr.config import LayoutConfig
+
+            layout_config = LayoutConfig(model_dir=layout_model)
+        else:
+            layout_config.model_dir = layout_model
+
+        detector = HFLayoutDetector(layout_config)
+        detector.start()
+
+        pipeline.layout_detector = detector
+        pipeline.enable_layout = True
+        parser.enable_layout = True
+
+        if not hasattr(pipeline, "max_workers") or not pipeline.max_workers:
+            pipeline.max_workers = 16
+
+    def _get_parser(self, *, model: str, enable_layout: bool, layout_model: str) -> Any:
+        cache_key = (model, enable_layout, layout_model)
         parser = self._parser_cache.get(cache_key)
         if parser is None:
-            parser = self._build_parser(model=model, enable_layout=enable_layout)
+            parser = self._build_parser(
+                model=model, enable_layout=enable_layout, layout_model=layout_model
+            )
             self._parser_cache[cache_key] = parser
         return parser
 
@@ -342,7 +439,8 @@ class GLMOCRExpertPipeline:
         bbox = region.get("bbox_2d")
         if isinstance(bbox, list) and len(bbox) == 4:
             bbox_value: tuple[object, ...] = tuple(
-                round(float(value), 4) if isinstance(value, (int, float)) else value for value in bbox
+                round(float(value), 4) if isinstance(value, (int, float)) else value
+                for value in bbox
             )
         else:
             bbox_value = ()
@@ -507,7 +605,9 @@ class GLMOCRExpertPipeline:
                 for signature, confidence in candidate_scores
                 if confidence is not None
             }
-            positional_scores = [confidence for _, confidence in candidate_scores if confidence is not None]
+            positional_scores = [
+                confidence for _, confidence in candidate_scores if confidence is not None
+            ]
 
             for region_index, region in enumerate(regions):
                 if not isinstance(region, dict):
@@ -742,7 +842,9 @@ class GLMOCRExpertPipeline:
         return pages or None
 
     @staticmethod
-    def _infer_page_size_from_regions(regions: list[dict[str, object]]) -> tuple[float, float] | None:
+    def _infer_page_size_from_regions(
+        regions: list[dict[str, object]],
+    ) -> tuple[float, float] | None:
         max_x = 0.0
         max_y = 0.0
         found_bbox = False
@@ -784,7 +886,9 @@ class GLMOCRExpertPipeline:
             if candidate_pages and page_index - 1 < len(candidate_pages):
                 raw_page = candidate_pages[page_index - 1]
             raw_page_dict = raw_page if isinstance(raw_page, dict) else {}
-            page_number = raw_page_dict.get("page_number") or raw_page_dict.get("page") or page_index
+            page_number = (
+                raw_page_dict.get("page_number") or raw_page_dict.get("page") or page_index
+            )
             try:
                 normalized_page_number = int(page_number)
             except (TypeError, ValueError):
@@ -957,6 +1061,186 @@ class GLMOCRExpertPipeline:
             page_texts.append("\n".join(region_texts).strip())
         return page_texts
 
+    def _get_table_recognizer(self) -> Any:
+        if self._table_recognizer is None:
+            from app.services.table_structure_recognizer import (
+                TableStructureRecognizer,
+            )
+
+            self._table_recognizer = TableStructureRecognizer()
+            self._table_recognizer.start()
+        return self._table_recognizer
+
+    @classmethod
+    def _is_table_label(cls, label: str) -> bool:
+        return cls._classify_layout_label(label) == "table"
+
+    @staticmethod
+    def _parse_table_content(text: str) -> list[list[str]]:
+        """Parse a table (HTML or markdown) into a list of rows, each a list of cell strings."""
+        import re
+        from html import unescape
+
+        # Try HTML table parse: look for <tr>...</tr> rows with <td>/<th> cells.
+        if "<tr" in text.lower():
+            rows: list[list[str]] = []
+            for tr_match in re.finditer(
+                r"<tr[^>]*>(.*?)</tr>",
+                text,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                tr_html = tr_match.group(1)
+                cells_text: list[str] = []
+                for cell_match in re.finditer(
+                    r"<(?:td|th)[^>]*>(.*?)</(?:td|th)>",
+                    tr_html,
+                    re.IGNORECASE | re.DOTALL,
+                ):
+                    cell_val = re.sub(r"<[^>]+>", "", cell_match.group(1))
+                    cells_text.append(unescape(cell_val).strip())
+                if cells_text:
+                    rows.append(cells_text)
+            if rows:
+                return rows
+
+        # Try markdown table parse: lines starting with |.
+        rows = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                continue
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if all(set(c) <= {"-", ":", " "} for c in cells if c):
+                continue
+            rows.append(cells)
+        return rows
+
+    @staticmethod
+    def _fill_cell_texts(
+        cells: list[dict[str, object]],
+        content: str,
+    ) -> None:
+        """Assign OCR text from *content* to cells by matching row/column indices."""
+        parsed_rows = GLMOCRExpertPipeline._parse_table_content(content)
+        if not parsed_rows:
+            # Fallback: split by newlines, treat each line as a row.
+            parsed_rows = [[line.strip()] for line in content.splitlines() if line.strip()]
+        if not parsed_rows:
+            return
+        logger.info(
+            "Parsed %d rows from table content (first row: %s)",
+            len(parsed_rows),
+            parsed_rows[0] if parsed_rows else "[]",
+        )
+        for cell in cells:
+            row_idx = cell.get("row", -1)
+            col_idx = cell.get("column", -1)
+            if not isinstance(row_idx, int) or not isinstance(col_idx, int):
+                continue
+            if 0 <= row_idx < len(parsed_rows):
+                row_cells = parsed_rows[row_idx]
+                if 0 <= col_idx < len(row_cells):
+                    cell["content"] = row_cells[col_idx]
+
+    def _enrich_table_regions(
+        self,
+        layout: list[dict[str, object]],
+        image: Image.Image,
+    ) -> list[dict[str, object]]:
+        """Add cell-level structure to table regions in *layout*."""
+        img_w, img_h = image.size
+        if img_w == 0 or img_h == 0:
+            return layout
+
+        recognizer = self._get_table_recognizer()
+        for page in layout:
+            if not isinstance(page, dict):
+                continue
+            regions = page.get("regions")
+            if not isinstance(regions, list):
+                continue
+            for region in regions:
+                if not isinstance(region, dict):
+                    continue
+                label = str(region.get("label") or "")
+                is_table = self._is_table_label(label)
+                logger.info(
+                    "Region label=%r is_table=%s",
+                    label,
+                    is_table,
+                )
+                if not is_table:
+                    continue
+                bbox = region.get("bbox_2d")
+                if not isinstance(bbox, list) or len(bbox) != 4:
+                    logger.warning("Table region has invalid bbox: %r", bbox)
+                    continue
+                try:
+                    # Denormalize from 0-1000 to pixel coords.
+                    x1 = float(bbox[0]) / 1000 * img_w
+                    y1 = float(bbox[1]) / 1000 * img_h
+                    x2 = float(bbox[2]) / 1000 * img_w
+                    y2 = float(bbox[3]) / 1000 * img_h
+                    x1 = max(0, min(x1, img_w))
+                    y1 = max(0, min(y1, img_h))
+                    x2 = max(0, min(x2, img_w))
+                    y2 = max(0, min(y2, img_h))
+                    if x2 - x1 < 10 or y2 - y1 < 10:
+                        logger.warning(
+                            "Table crop too small: %.1fx%.1f",
+                            x2 - x1,
+                            y2 - y1,
+                        )
+                        continue
+                    crop = image.crop((int(x1), int(y1), int(x2), int(y2)))
+                    logger.info(
+                        "Running table structure recognition on %dx%d crop",
+                        crop.width,
+                        crop.height,
+                    )
+                    cells = recognizer.recognize(crop)
+                    logger.info(
+                        "Table recognizer returned %d cells",
+                        len(cells),
+                    )
+                    if not cells:
+                        continue
+                    # Convert crop-relative pixel coords back to 0-1000.
+                    for cell in cells:
+                        cb = cell.get("bbox_2d")
+                        if isinstance(cb, list) and len(cb) == 4:
+                            abs_x1 = x1 + cb[0]
+                            abs_y1 = y1 + cb[1]
+                            abs_x2 = x1 + cb[2]
+                            abs_y2 = y1 + cb[3]
+                            cell["bbox_2d"] = [
+                                abs_x1 / img_w * 1000,
+                                abs_y1 / img_h * 1000,
+                                abs_x2 / img_w * 1000,
+                                abs_y2 / img_h * 1000,
+                            ]
+                            cell["polygon"] = [
+                                cell["bbox_2d"][0],
+                                cell["bbox_2d"][1],
+                                cell["bbox_2d"][2],
+                                cell["bbox_2d"][1],
+                                cell["bbox_2d"][2],
+                                cell["bbox_2d"][3],
+                                cell["bbox_2d"][0],
+                                cell["bbox_2d"][3],
+                            ]
+                    # Map OCR text from region content into cells.
+                    content = str(region.get("content") or "")
+                    if content:
+                        self._fill_cell_texts(cells, content)
+                    region["cells"] = cells
+                except Exception as _exc:  # noqa: BLE001
+                    logger.warning(
+                        "Table structure recognition failed for region: %s",
+                        _exc,
+                    )
+        return layout
+
     async def _fallback_to_direct(
         self,
         *,
@@ -971,6 +1255,7 @@ class GLMOCRExpertPipeline:
         token_limit: int | None,
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
+        expert_layout_model: str | None = None,
     ) -> OCRResult:
         result = await self.direct_pipeline.run(
             image_bytes=image_bytes,
@@ -983,6 +1268,7 @@ class GLMOCRExpertPipeline:
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
         result.warnings.append(reason)
         return result
@@ -1000,12 +1286,14 @@ class GLMOCRExpertPipeline:
         token_limit: int | None = None,
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
+        expert_layout_model: str | None = None,
     ) -> OCRResult:
         selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
         selected_model = (model or "").strip() or self.default_model
         selected_enable_layout = (
             self.enable_layout if expert_enable_layout is None else expert_enable_layout
         )
+        selected_layout_model = (expert_layout_model or "").strip() or self.layout_model
 
         if mode != "plain":
             return await self._fallback_to_direct(
@@ -1020,6 +1308,7 @@ class GLMOCRExpertPipeline:
                 token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
+                expert_layout_model=expert_layout_model,
             )
 
         if selected_task != PLAIN_TASK_OCR_TEXT or (custom_prompt and custom_prompt.strip()):
@@ -1038,6 +1327,7 @@ class GLMOCRExpertPipeline:
                 token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
+                expert_layout_model=expert_layout_model,
             )
 
         if content_type == "image/gif":
@@ -1056,6 +1346,7 @@ class GLMOCRExpertPipeline:
                 token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
+                expert_layout_model=expert_layout_model,
             )
 
         suffix = _CONTENT_TYPE_SUFFIX_MAP.get(content_type or "", ".bin")
@@ -1066,7 +1357,11 @@ class GLMOCRExpertPipeline:
                 temp_file.write(image_bytes)
                 temp_path = Path(temp_file.name)
 
-            parser = self._get_parser(model=selected_model, enable_layout=selected_enable_layout)
+            parser = self._get_parser(
+                model=selected_model,
+                enable_layout=selected_enable_layout,
+                layout_model=selected_layout_model,
+            )
             parse_result = parser.parse(
                 str(temp_path),
                 save_results=False,
@@ -1077,6 +1372,14 @@ class GLMOCRExpertPipeline:
             layout = self._apply_page_region_scores_to_layout(
                 layout, self._extract_page_region_scores_from_parse_result(parse_result)
             )
+            table_enrich_warning: str | None = None
+            if selected_enable_layout and layout and temp_path is not None:
+                try:
+                    with Image.open(temp_path) as img:
+                        img_rgb = img.convert("RGB")
+                        layout = self._enrich_table_regions(layout, img_rgb)
+                except Exception as exc:  # noqa: BLE001
+                    table_enrich_warning = f"Tabellenstruktur-Erkennung fehlgeschlagen: {exc}"
             page_infos = self._extract_page_infos(parse_result, layout=layout)
             text = self._extract_markdown(parse_result)
             layout_visualizations = (
@@ -1086,6 +1389,8 @@ class GLMOCRExpertPipeline:
             )
             page_texts = self._build_page_texts_from_layout(layout)
             warnings: list[str] = []
+            if table_enrich_warning:
+                warnings.append(table_enrich_warning)
             if not text:
                 text = self._build_text_from_layout(layout)
                 if text:

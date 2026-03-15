@@ -57,7 +57,10 @@ class FakeCompatRequest:
 
 
 def _request(
-    *, body: bytes = b"", content_type: str | None = None, query_params: dict[str, str] | None = None
+    *,
+    body: bytes = b"",
+    content_type: str | None = None,
+    query_params: dict[str, str] | None = None,
 ) -> Request:
     return cast(
         Request,
@@ -83,6 +86,7 @@ class FakeBackendRouter:
         token_limit: int | None,
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
+        expert_layout_model: str | None = None,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -96,6 +100,7 @@ class FakeBackendRouter:
             "token_limit": token_limit,
             "gif_max_frames": gif_max_frames,
             "expert_enable_layout": expert_enable_layout,
+            "expert_layout_model": expert_layout_model,
         }
         result = type(
             "OCRResult",
@@ -175,6 +180,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         token_limit: int | None,
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
+        expert_layout_model: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -188,6 +194,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
         result.layout = None
         return result, selected_backend

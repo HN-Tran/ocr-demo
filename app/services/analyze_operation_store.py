@@ -93,7 +93,9 @@ class AnalyzeOperationStore:
             self._persist_operation(operation)
         return operation
 
-    async def mark_running(self, operation_id: str, *, started_at: datetime) -> AnalyzeOperation | None:
+    async def mark_running(
+        self, operation_id: str, *, started_at: datetime
+    ) -> AnalyzeOperation | None:
         async with self._lock:
             operation = self._operations.get(operation_id)
             if operation is None:

@@ -61,6 +61,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         ocr_api_port=settings.ocr_expert_ocr_api_port,
         timeout_s=settings.request_timeout_s,
         enable_layout=settings.ocr_expert_enable_layout,
+        layout_model=settings.ocr_expert_layout_model,
     )
     ocr_backend_router = OCRBackendRouter(
         default_backend=settings.ocr_backend,
@@ -105,6 +106,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_token_limit": settings.default_token_limit,
                 "default_backend": settings.ocr_backend,
                 "default_expert_enable_layout": settings.ocr_expert_enable_layout,
+                "default_expert_layout_model": settings.ocr_expert_layout_model,
                 "static_version": version,
                 "app_base_path": app_base_path,
             },

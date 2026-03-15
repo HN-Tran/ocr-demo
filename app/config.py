@@ -46,6 +46,7 @@ class Settings:
     ocr_backend: str
     ocr_expert_mode: str
     ocr_expert_enable_layout: bool
+    ocr_expert_layout_model: str
     ocr_expert_ocr_api_host: str
     ocr_expert_ocr_api_port: int
     default_token_limit: int
@@ -91,6 +92,9 @@ def get_settings() -> Settings:
         ocr_backend=ocr_backend,
         ocr_expert_mode=ocr_expert_mode,
         ocr_expert_enable_layout=_env_bool("OCR_EXPERT_ENABLE_LAYOUT", True),
+        ocr_expert_layout_model=os.getenv(
+            "OCR_EXPERT_LAYOUT_MODEL", "PaddlePaddle/PP-DocLayoutV3_safetensors"
+        ),
         ocr_expert_ocr_api_host=os.getenv("OCR_EXPERT_OCR_API_HOST", default_expert_host),
         ocr_expert_ocr_api_port=ocr_expert_ocr_api_port,
         default_token_limit=default_token_limit,

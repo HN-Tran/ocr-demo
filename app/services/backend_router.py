@@ -34,6 +34,7 @@ class OCRBackendRouter:
         token_limit: int | None = None,
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
+        expert_layout_model: str | None = None,
     ) -> tuple[OCRResult, str]:
         requested_backend = (
             self.default_backend if backend is None else self.normalize_backend(backend)
@@ -54,5 +55,6 @@ class OCRBackendRouter:
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
         return result, requested_backend

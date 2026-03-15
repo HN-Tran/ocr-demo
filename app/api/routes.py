@@ -104,7 +104,9 @@ def _query_param(request: Request, name: str) -> str | None:
     return value
 
 
-def _resolve_text_param(form_value: object, query_value: str | None, default: str | None) -> str | None:
+def _resolve_text_param(
+    form_value: object, query_value: str | None, default: str | None
+) -> str | None:
     if isinstance(form_value, str) and form_value != "":
         return form_value
     if query_value is not None:
@@ -360,7 +362,9 @@ def _build_line_and_word_entries(
                 region_content
             ]
             for line_index, segment in enumerate(segments):
-                line_rect = _slice_line_rect(region_rect, line_index=line_index, line_count=len(segments))
+                line_rect = _slice_line_rect(
+                    region_rect, line_index=line_index, line_count=len(segments)
+                )
                 if region_polygon is not None and len(segments) == 1:
                     polygon = region_polygon
                 else:
@@ -394,9 +398,7 @@ def _build_line_and_word_entries(
                         "content": word_content,
                         "span": _make_span(
                             offset=line_span["offset"]
-                            + _string_unit_length(
-                                segment[: word_match.start()], string_index_type
-                            ),
+                            + _string_unit_length(segment[: word_match.start()], string_index_type),
                             text=word_content,
                             string_index_type=string_index_type,
                         ),
@@ -483,7 +485,9 @@ def _build_paragraph_entries_for_page(
                 "spans": [paragraph_span],
                 "boundingRegions": [],
             }
-            polygon = _coerce_polygon(region.get("polygon")) or _bbox_to_polygon(region.get("bbox_2d"))
+            polygon = _coerce_polygon(region.get("polygon")) or _bbox_to_polygon(
+                region.get("bbox_2d")
+            )
             if polygon is not None:
                 paragraph["boundingRegions"] = [
                     {
@@ -529,17 +533,32 @@ def _build_document_projection(
                 {
                     **_page_entry_base({}, 1),
                     "content": content.strip(),
-                    "spans": [_make_span(offset=0, text=content.strip(), string_index_type=string_index_type)],
+                    "spans": [
+                        _make_span(
+                            offset=0, text=content.strip(), string_index_type=string_index_type
+                        )
+                    ],
                     "lines": [],
                     "words": [],
                 }
             ],
-            [{"content": content.strip(), "spans": [_make_span(offset=0, text=content.strip(), string_index_type=string_index_type)]}],
+            [
+                {
+                    "content": content.strip(),
+                    "spans": [
+                        _make_span(
+                            offset=0, text=content.strip(), string_index_type=string_index_type
+                        )
+                    ],
+                }
+            ],
         )
 
     page_contexts: list[dict[str, object]] = []
     for page_index in range(1, page_count + 1):
-        page_info = (page_infos or [])[page_index - 1] if page_index - 1 < len(page_infos or []) else {}
+        page_info = (
+            (page_infos or [])[page_index - 1] if page_index - 1 < len(page_infos or []) else {}
+        )
         page_layout = (layout or [])[page_index - 1] if page_index - 1 < len(layout or []) else None
         raw_page_text = (
             (page_texts or [])[page_index - 1]
@@ -772,7 +791,9 @@ def _filter_result_pages(
         filtered_page_infos = [
             page_info
             for index, page_info in enumerate(page_infos, start=1)
-            if _page_number(page_info.get("page_number") if isinstance(page_info, dict) else None, index)
+            if _page_number(
+                page_info.get("page_number") if isinstance(page_info, dict) else None, index
+            )
             in selected_pages
         ]
 
@@ -833,10 +854,14 @@ async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
                     detail=f"urlSource konnte nicht geladen werden: {exc}",
                 ) from exc
         image_bytes = response.content
-        content_type = _resolve_effective_content_type(response.headers.get("content-type"), image_bytes)
+        content_type = _resolve_effective_content_type(
+            response.headers.get("content-type"), image_bytes
+        )
     else:
         image_bytes = await request.body()
-        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+        content_type = _resolve_effective_content_type(
+            request.headers.get("content-type"), image_bytes
+        )
 
     if not image_bytes:
         raise HTTPException(
@@ -858,6 +883,7 @@ async def _run_plain_ocr(
     content_type: str,
     backend: str | None = None,
     expert_enable_layout: bool | None = None,
+    expert_layout_model: str | None = None,
 ) -> tuple[object, str]:
     try:
         return await pipeline.run(
@@ -872,6 +898,7 @@ async def _run_plain_ocr(
             token_limit=None,
             gif_max_frames=None,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -895,6 +922,7 @@ async def _execute_compat_analyze_operation(
     content_type: str,
     backend: str | None,
     expert_enable_layout: bool | None,
+    expert_layout_model: str | None = None,
 ) -> None:
     try:
         await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
@@ -904,6 +932,7 @@ async def _execute_compat_analyze_operation(
             content_type=content_type,
             backend=backend,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
         completed_at = datetime.now(timezone.utc)
         payload = _build_compat_response_payload(
@@ -953,7 +982,9 @@ def _build_compat_response_payload(
         page_infos=page_infos,
         page_texts=page_texts,
     )
-    content = _content_from_page_texts_or_layout(filtered_page_texts, filtered_layout, getattr(result, "text", ""))
+    content = _content_from_page_texts_or_layout(
+        filtered_page_texts, filtered_layout, getattr(result, "text", "")
+    )
     return {
         "status": "succeeded",
         "createdDateTime": _isoformat_utc(started_at),
@@ -970,7 +1001,9 @@ def _build_compat_response_payload(
     }
 
 
-def _operation_location(request: Request, *, model_id: str, result_id: str, api_version: str) -> str:
+def _operation_location(
+    request: Request, *, model_id: str, result_id: str, api_version: str
+) -> str:
     base_location = str(
         request.url_for(
             "compat_get_analyze_result",
@@ -982,7 +1015,9 @@ def _operation_location(request: Request, *, model_id: str, result_id: str, api_
     return f"{base_location}{separator}api-version={api_version}"
 
 
-def _compat_headers(*, request_id: str | None = None, retry_after: str | None = None) -> dict[str, str]:
+def _compat_headers(
+    *, request_id: str | None = None, retry_after: str | None = None
+) -> dict[str, str]:
     headers = {"apim-request-id": request_id or str(uuid4())}
     if retry_after is not None:
         headers["Retry-After"] = retry_after
@@ -1030,6 +1065,7 @@ async def ocr(
     token_limit: int | None = Form(None),
     gif_max_frames: int | None = Form(None),
     expert_enable_layout: bool | None = Form(None),
+    expert_layout_model: str | None = Form(None),
     backend: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
@@ -1041,7 +1077,9 @@ async def ocr(
     model = _resolve_text_param(model, _query_param(request, "model"), None)
     task = _resolve_text_param(task, _query_param(request, "task"), None)
     custom_prompt = _resolve_text_param(custom_prompt, _query_param(request, "custom_prompt"), None)
-    token_limit = _resolve_int_param(token_limit, _query_param(request, "token_limit"), "token_limit")
+    token_limit = _resolve_int_param(
+        token_limit, _query_param(request, "token_limit"), "token_limit"
+    )
     gif_max_frames = _resolve_int_param(
         gif_max_frames, _query_param(request, "gif_max_frames"), "gif_max_frames"
     )
@@ -1050,6 +1088,9 @@ async def ocr(
         _query_param(request, "expert_enable_layout"),
         "expert_enable_layout",
     )
+    expert_layout_model = _resolve_text_param(
+        expert_layout_model, _query_param(request, "expert_layout_model"), None
+    )
     backend = _resolve_text_param(backend, _query_param(request, "backend"), None)
 
     if file is not None:
@@ -1057,7 +1098,9 @@ async def ocr(
         content_type = _resolve_effective_content_type(file.content_type, image_bytes)
     else:
         image_bytes = await request.body()
-        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+        content_type = _resolve_effective_content_type(
+            request.headers.get("content-type"), image_bytes
+        )
 
     if not image_bytes:
         raise HTTPException(
@@ -1083,6 +1126,7 @@ async def ocr(
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1159,6 +1203,7 @@ async def compat_sync_analyze(
     string_index_type: str | None = Query(None, alias="stringIndexType"),
     backend: str | None = Query(None),
     expert_enable_layout: bool | None = Query(None),
+    expert_layout_model: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
     del locale
@@ -1175,6 +1220,7 @@ async def compat_sync_analyze(
         content_type=content_type,
         backend=backend,
         expert_enable_layout=expert_enable_layout,
+        expert_layout_model=expert_layout_model,
     )
     completed_at = datetime.now(timezone.utc)
     return JSONResponse(
@@ -1200,6 +1246,7 @@ async def compat_analyze(
     string_index_type: str | None = Query(None, alias="stringIndexType"),
     backend: str | None = Query(None),
     expert_enable_layout: bool | None = Query(None),
+    expert_layout_model: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
 ) -> Response:
@@ -1226,6 +1273,7 @@ async def compat_analyze(
             content_type=content_type,
             backend=backend,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
         )
     )
 
@@ -1298,7 +1346,9 @@ router.add_api_route("/v1/models/", models, methods=["GET"], include_in_schema=F
 router.add_api_route("/v1/schemas/", schemas, methods=["GET"], include_in_schema=False)
 router.add_api_route("/v1/ocr/", ocr, methods=["POST"], include_in_schema=False)
 
-compat_router.add_api_route("/ready/", compat_service_ready, methods=["GET"], include_in_schema=False)
+compat_router.add_api_route(
+    "/ready/", compat_service_ready, methods=["GET"], include_in_schema=False
+)
 compat_router.add_api_route(
     "/ContainerReadiness/",
     compat_service_ready,

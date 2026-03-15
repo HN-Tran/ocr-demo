@@ -29,6 +29,12 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
         --extra-index-url https://pypi.org/simple \
         torch torchvision && \
     python -m pip install --no-cache-dir .
+
+RUN useradd -r -u 101 -m appuser && \
+    mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appuser /home/appuser /app
+
+USER 101
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

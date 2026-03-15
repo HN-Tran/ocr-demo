@@ -18,6 +18,7 @@ def _settings(*, app_base_path: str = "") -> Settings:
         ocr_backend="direct",
         ocr_expert_mode="selfhosted",
         ocr_expert_enable_layout=True,
+        ocr_expert_layout_model="PaddlePaddle/PP-DocLayoutV3_safetensors",
         ocr_expert_ocr_api_host="localhost",
         ocr_expert_ocr_api_port=11434,
         default_token_limit=16384,

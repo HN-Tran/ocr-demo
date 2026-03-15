@@ -169,7 +169,9 @@ class OCRPipeline:
             "spans": [],
         }
 
-    def _preprocess(self, image_bytes: bytes, *, page_number: int) -> tuple[bytes, list[str], dict[str, object]]:
+    def _preprocess(
+        self, image_bytes: bytes, *, page_number: int
+    ) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
         with Image.open(BytesIO(image_bytes)) as image:
             image = ImageOps.exif_transpose(image)
@@ -188,10 +190,14 @@ class OCRPipeline:
 
             output = BytesIO()
             image.save(output, format="PNG", optimize=True)
-            return output.getvalue(), warnings, self._build_page_info(
-                page_number=page_number,
-                width=image.width,
-                height=image.height,
+            return (
+                output.getvalue(),
+                warnings,
+                self._build_page_info(
+                    page_number=page_number,
+                    width=image.width,
+                    height=image.height,
+                ),
             )
 
     def _render_pdf_pages(self, pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
@@ -745,6 +751,7 @@ class OCRPipeline:
         token_limit: int | None = None,
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
+        expert_layout_model: str | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
