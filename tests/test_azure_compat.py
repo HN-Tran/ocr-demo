@@ -87,6 +87,7 @@ class FakeBackendRouter:
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -181,6 +182,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,

@@ -36,7 +36,7 @@ class TableStructureRecognizer:
         *,
         model_name: str = _DEFAULT_MODEL,
         device: str | None = None,
-        threshold: float = 0.5,
+        threshold: float = 0.7,
     ) -> None:
         self.model_name = model_name
         self.threshold = threshold

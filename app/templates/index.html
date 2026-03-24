@@ -168,6 +168,22 @@
             </label>
 
             <label>
+              Dev: Layout-Schwellenwert
+              <input
+                id="expert_layout_threshold"
+                name="expert_layout_threshold"
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                placeholder="0.4"
+              />
+              <span class="hint">
+                Confidence-Schwellenwert für Layout-Erkennung (0–1). Niedrigere Werte erkennen mehr Regionen, höhere filtern unsichere Ergebnisse.
+              </span>
+            </label>
+
+            <label>
               Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>

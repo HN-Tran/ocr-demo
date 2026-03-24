@@ -207,7 +207,7 @@ class GLMOCRExpertPipeline:
                     "cuda_visible_devices": "0",
                     "img_size": None,
                     "layout_nms": True,
-                    "layout_unclip_ratio": [1.0, 1.0],
+                    "layout_unclip_ratio": [1.05, 1.05],
                     "layout_merge_bboxes_mode": "large",
                     "label_task_mapping": {},
                     "id2label": None,
@@ -401,6 +401,22 @@ class GLMOCRExpertPipeline:
             )
             self._parser_cache[cache_key] = parser
         return parser
+
+    @staticmethod
+    def _apply_layout_threshold(parser: Any, threshold: float) -> None:
+        """Update the layout detector's confidence threshold on a cached parser."""
+        pipeline = getattr(parser, "_pipeline", None)
+        if pipeline is None:
+            return
+        detector = getattr(pipeline, "layout_detector", None)
+        if detector is None:
+            return
+        detector.threshold = threshold
+        # Also update the GLM-OCR layout config if present.
+        layout_config = getattr(pipeline, "config", None)
+        layout_config = getattr(layout_config, "layout", None)
+        if layout_config is not None:
+            layout_config.threshold = threshold
 
     @staticmethod
     def _extract_markdown(parse_result: Any) -> str:
@@ -1133,27 +1149,59 @@ class GLMOCRExpertPipeline:
         cells: list[dict[str, object]],
         content: str,
     ) -> None:
-        """Assign OCR text from *content* to cells by matching row/column indices."""
+        """Assign OCR text from *content* to cells by matching row/column indices.
+
+        When the Table Transformer detects more rows or columns than the OCR
+        output contains, the grid is reconciled: excess detector rows/columns
+        are merged into the nearest OCR row/column so that text maps correctly.
+        """
         parsed_rows = GLMOCRExpertPipeline._parse_table_content(content)
         if not parsed_rows:
-            # Fallback: split by newlines, treat each line as a row.
             parsed_rows = [[line.strip()] for line in content.splitlines() if line.strip()]
         if not parsed_rows:
             return
+
+        ocr_row_count = len(parsed_rows)
+        ocr_col_count = max((len(row) for row in parsed_rows), default=0)
+        det_row_count = max((c.get("row", 0) for c in cells if isinstance(c.get("row"), int)), default=-1) + 1
+        det_col_count = max((c.get("column", 0) for c in cells if isinstance(c.get("column"), int)), default=-1) + 1
+
         logger.info(
-            "Parsed %d rows from table content (first row: %s)",
-            len(parsed_rows),
-            parsed_rows[0] if parsed_rows else "[]",
+            "Table grid: OCR %d×%d, detector %d×%d",
+            ocr_row_count,
+            ocr_col_count,
+            det_row_count,
+            det_col_count,
         )
+
+        # Build mapping from detector indices to OCR indices.
+        # Evenly distributes detector indices across the OCR range.
+        def _build_index_map(det_count: int, ocr_count: int) -> dict[int, int]:
+            if det_count <= ocr_count:
+                return {i: i for i in range(det_count)}
+            mapping: dict[int, int] = {}
+            for det_idx in range(det_count):
+                ocr_idx = int(det_idx * ocr_count / det_count)
+                mapping[det_idx] = min(ocr_idx, ocr_count - 1)
+            return mapping
+
+        row_map = _build_index_map(det_row_count, ocr_row_count)
+        col_map = _build_index_map(det_col_count, ocr_col_count)
+
         for cell in cells:
             row_idx = cell.get("row", -1)
             col_idx = cell.get("column", -1)
             if not isinstance(row_idx, int) or not isinstance(col_idx, int):
                 continue
-            if 0 <= row_idx < len(parsed_rows):
-                row_cells = parsed_rows[row_idx]
-                if 0 <= col_idx < len(row_cells):
-                    cell["content"] = row_cells[col_idx]
+            mapped_row = row_map.get(row_idx, row_idx)
+            mapped_col = col_map.get(col_idx, col_idx)
+            # Update indices so downstream consumers see the corrected grid.
+            cell["row"] = mapped_row
+            cell["column"] = mapped_col
+            if 0 <= mapped_row < len(parsed_rows):
+                row_cells = parsed_rows[mapped_row]
+                if 0 <= mapped_col < len(row_cells):
+                    cell["content"] = row_cells[mapped_col]
 
     def _enrich_table_regions(
         self,
@@ -1272,6 +1320,7 @@ class GLMOCRExpertPipeline:
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> OCRResult:
         result = await self.direct_pipeline.run(
             image_bytes=image_bytes,
@@ -1285,6 +1334,7 @@ class GLMOCRExpertPipeline:
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
         )
         result.warnings.append(reason)
         return result
@@ -1303,6 +1353,7 @@ class GLMOCRExpertPipeline:
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> OCRResult:
         selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
         selected_model = (model or "").strip() or self.default_model
@@ -1310,6 +1361,7 @@ class GLMOCRExpertPipeline:
             self.enable_layout if expert_enable_layout is None else expert_enable_layout
         )
         selected_layout_model = (expert_layout_model or "").strip() or self.layout_model
+        selected_layout_threshold = expert_layout_threshold
 
         if mode != "plain":
             return await self._fallback_to_direct(
@@ -1325,6 +1377,7 @@ class GLMOCRExpertPipeline:
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
                 expert_layout_model=expert_layout_model,
+                expert_layout_threshold=expert_layout_threshold,
             )
 
         if selected_task != PLAIN_TASK_OCR_TEXT or (custom_prompt and custom_prompt.strip()):
@@ -1344,6 +1397,7 @@ class GLMOCRExpertPipeline:
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
                 expert_layout_model=expert_layout_model,
+                expert_layout_threshold=expert_layout_threshold,
             )
 
         if content_type == "image/gif":
@@ -1363,6 +1417,7 @@ class GLMOCRExpertPipeline:
                 gif_max_frames=gif_max_frames,
                 expert_enable_layout=expert_enable_layout,
                 expert_layout_model=expert_layout_model,
+                expert_layout_threshold=expert_layout_threshold,
             )
 
         suffix = _CONTENT_TYPE_SUFFIX_MAP.get(content_type or "", ".bin")
@@ -1378,6 +1433,8 @@ class GLMOCRExpertPipeline:
                 enable_layout=selected_enable_layout,
                 layout_model=selected_layout_model,
             )
+            if selected_layout_threshold is not None and selected_enable_layout:
+                self._apply_layout_threshold(parser, selected_layout_threshold)
             parse_result = parser.parse(
                 str(temp_path),
                 save_results=False,

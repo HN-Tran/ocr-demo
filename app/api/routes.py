@@ -128,6 +128,27 @@ def _resolve_int_param(form_value: object, query_value: str | None, field_name: 
         ) from exc
 
 
+def _resolve_float_param(
+    form_value: object, query_value: str | None, field_name: str
+) -> float | None:
+    if isinstance(form_value, (int, float)) and not isinstance(form_value, bool):
+        return float(form_value)
+    if isinstance(form_value, str) and form_value.strip():
+        try:
+            return float(form_value)
+        except ValueError:
+            pass
+    if query_value is None:
+        return None
+    try:
+        return float(query_value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ungültiger Float-Parameter: {field_name}",
+        ) from exc
+
+
 def _resolve_bool_param(
     form_value: object, query_value: str | None, field_name: str
 ) -> bool | None:
@@ -969,6 +990,7 @@ async def _run_plain_ocr(
     backend: str | None = None,
     expert_enable_layout: bool | None = None,
     expert_layout_model: str | None = None,
+    expert_layout_threshold: float | None = None,
 ) -> tuple[object, str]:
     try:
         return await pipeline.run(
@@ -984,6 +1006,7 @@ async def _run_plain_ocr(
             gif_max_frames=None,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1008,6 +1031,7 @@ async def _execute_compat_analyze_operation(
     backend: str | None,
     expert_enable_layout: bool | None,
     expert_layout_model: str | None = None,
+    expert_layout_threshold: float | None = None,
 ) -> None:
     try:
         await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
@@ -1018,6 +1042,7 @@ async def _execute_compat_analyze_operation(
             backend=backend,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
         )
         completed_at = datetime.now(timezone.utc)
         payload = _build_compat_response_payload(
@@ -1151,6 +1176,7 @@ async def ocr(
     gif_max_frames: int | None = Form(None),
     expert_enable_layout: bool | None = Form(None),
     expert_layout_model: str | None = Form(None),
+    expert_layout_threshold: float | None = Form(None),
     backend: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
@@ -1175,6 +1201,11 @@ async def ocr(
     )
     expert_layout_model = _resolve_text_param(
         expert_layout_model, _query_param(request, "expert_layout_model"), None
+    )
+    expert_layout_threshold = _resolve_float_param(
+        expert_layout_threshold,
+        _query_param(request, "expert_layout_threshold"),
+        "expert_layout_threshold",
     )
     backend = _resolve_text_param(backend, _query_param(request, "backend"), None)
 
@@ -1212,6 +1243,7 @@ async def ocr(
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1290,6 +1322,7 @@ async def compat_sync_analyze(
     backend: str | None = Query(None),
     expert_enable_layout: bool | None = Query(None),
     expert_layout_model: str | None = Query(None),
+    expert_layout_threshold: float | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
     del locale
@@ -1307,6 +1340,7 @@ async def compat_sync_analyze(
         backend=backend,
         expert_enable_layout=expert_enable_layout,
         expert_layout_model=expert_layout_model,
+        expert_layout_threshold=expert_layout_threshold,
     )
     completed_at = datetime.now(timezone.utc)
     return JSONResponse(
@@ -1333,6 +1367,7 @@ async def compat_analyze(
     backend: str | None = Query(None),
     expert_enable_layout: bool | None = Query(None),
     expert_layout_model: str | None = Query(None),
+    expert_layout_threshold: float | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
 ) -> Response:
@@ -1360,6 +1395,7 @@ async def compat_analyze(
             backend=backend,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
         )
     )
 

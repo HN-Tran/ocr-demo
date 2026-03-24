@@ -84,6 +84,7 @@ class FakeBackendRouter:
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -184,6 +185,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         gif_max_frames: int | None,
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,

@@ -889,6 +889,12 @@ function buildPayload() {
   } else {
     payload.delete("expert_layout_model");
   }
+  const expertLayoutThresholdValue = String(payload.get("expert_layout_threshold") || "").trim();
+  if (expertLayoutThresholdValue) {
+    payload.set("expert_layout_threshold", expertLayoutThresholdValue);
+  } else {
+    payload.delete("expert_layout_threshold");
+  }
   if (!payload.get("model")) {
     payload.delete("model");
   }

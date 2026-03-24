@@ -752,6 +752,7 @@ class OCRPipeline:
         gif_max_frames: int | None = None,
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
+        expert_layout_threshold: float | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
