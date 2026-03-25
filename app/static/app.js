@@ -8,6 +8,7 @@ const schemaNameEl = document.getElementById("schema_name");
 const backendEl = document.getElementById("backend");
 const expertEnableLayoutEl = document.getElementById("expert_enable_layout");
 const expertLayoutModelEl = document.getElementById("expert_layout_model");
+const expertLayoutThresholdEl = document.getElementById("expert_layout_threshold");
 const modelEl = document.getElementById("model");
 const tokenLimitEl = document.getElementById("token_limit");
 const gifMaxFramesEl = document.getElementById("gif_max_frames");
@@ -1606,6 +1607,9 @@ expertEnableLayoutEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
 expertLayoutModelEl.addEventListener("change", () => {
+  setAdvancedDirty(true);
+});
+expertLayoutThresholdEl.addEventListener("input", () => {
   setAdvancedDirty(true);
 });
 modelEl.addEventListener("input", () => {
