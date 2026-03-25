@@ -41,20 +41,10 @@ _FORMULA_LABELS = {
     "equation_footnote", "isolate_formula", "Formula",
 }
 
-_REGION_PROMPTS = {
-    "text": (
-        "Recognize all text in this image. Output only the exact text, "
-        "preserving line breaks and language. Do not add any commentary."
-    ),
-    "table": (
-        "Recognize the table in this image. Output the table as an HTML "
-        "<table> with <tr> and <td>/<th> tags. Preserve all cell content exactly."
-    ),
-    "formula": (
-        "Recognize the mathematical formula in this image. "
-        "Output the formula in LaTeX notation."
-    ),
-}
+_TABLE_PROMPT = (
+    "Recognize the table in this image. Output the table as an HTML "
+    "<table> with <tr> and <td>/<th> tags. Preserve all cell content exactly."
+)
 
 
 def _classify_label(label: str) -> str:
@@ -252,14 +242,14 @@ class DocumentPipeline:
     # Per-region OCR
     # ------------------------------------------------------------------
 
-    async def _ocr_region(
+    async def _ocr_table_region(
         self,
         image: Image.Image,
         region: dict[str, Any],
         *,
         model: str,
     ) -> str:
-        """Crop and OCR a single region."""
+        """Crop and OCR a table region to get HTML table output."""
         bbox = region.get("bbox_2d", [0, 0, 0, 0])
         img_w, img_h = image.size
         x1 = int(bbox[0] / 1000 * img_w)
@@ -275,14 +265,9 @@ class DocumentPipeline:
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
 
-        task_type = region.get("task_type", "text")
-        if task_type == "skip":
-            return ""
-        prompt = _REGION_PROMPTS.get(task_type, _REGION_PROMPTS["text"])
-
         raw = await self.ollama_client.run_ocr(
             image_bytes=buf.getvalue(),
-            prompt=prompt,
+            prompt=_TABLE_PROMPT,
             model=model,
         )
         return normalize_ocr_text_output(raw)
@@ -294,56 +279,75 @@ class DocumentPipeline:
     async def _process_page(
         self,
         image: Image.Image,
+        image_bytes: bytes,
         *,
         model: str,
         detector: HFLayoutDetector,
         page_number: int,
     ) -> tuple[dict[str, object], str, list[str]]:
-        """Detect layout, OCR regions, return (page_layout, page_text, warnings)."""
+        """Full-page OCR + layout detection, return (page_layout, page_text, warnings)."""
         warnings: list[str] = []
+
+        # 1. Full-page OCR — one call, no cropping, no clipping.
+        try:
+            page_text = await self.ollama_client.run_ocr(
+                image_bytes=image_bytes,
+                prompt=self.direct_pipeline.plain_prompt_template,
+                model=model,
+            )
+            page_text = normalize_ocr_text_output(page_text)
+        except OllamaError as exc:
+            warnings.append(f"Seiten-OCR fehlgeschlagen: {exc}")
+            page_text = ""
+
+        # 2. Layout detection — for structure only.
         detection_results = detector.process([image])
         raw_regions = detection_results[0] if detection_results else []
         regions = _sort_reading_order(raw_regions)
 
-        # OCR each region
-        page_texts: list[str] = []
+        # 3. Build layout regions; OCR tables separately for HTML cell structure.
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
             label = region.get("label", "")
 
-            try:
-                content = await self._ocr_region(image, region, model=model)
-            except OllamaError as exc:
-                warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
-                content = ""
-
             layout_region: dict[str, object] = {
                 "index": idx,
                 "label": label,
-                "content": content,
                 "bbox_2d": region.get("bbox_2d"),
                 "polygon": region.get("polygon"),
                 "confidence": region.get("score"),
             }
 
-            # Table cell extraction from HTML
-            if task_type == "table" and content:
-                parsed_rows = _parse_table_html(content)
-                if parsed_rows:
-                    cells = _build_table_cells(parsed_rows, region.get("bbox_2d", [0, 0, 0, 0]))
-                    layout_region["cells"] = cells
-                    layout_region["content"] = _strip_table_markup(content)
+            # Table regions get a separate OCR call for HTML cell extraction.
+            if task_type == "table":
+                try:
+                    table_html = await self._ocr_table_region(image, region, model=model)
+                except OllamaError as exc:
+                    warnings.append(f"Region {idx} ({label}) Tabellen-OCR fehlgeschlagen: {exc}")
+                    table_html = ""
+                if table_html:
+                    parsed_rows = _parse_table_html(table_html)
+                    if parsed_rows:
+                        cells = _build_table_cells(
+                            parsed_rows, region.get("bbox_2d", [0, 0, 0, 0])
+                        )
+                        layout_region["cells"] = cells
+                    layout_region["content"] = _strip_table_markup(table_html)
+                else:
+                    layout_region["content"] = ""
+            else:
+                # Non-table regions don't need individual OCR; text comes from
+                # the full-page pass. We leave content empty — the full page
+                # text is the authoritative source.
+                layout_region["content"] = ""
 
             layout_regions.append(layout_region)
-            if content and task_type != "skip":
-                page_texts.append(content if task_type != "table" else layout_region["content"])
 
         page_layout: dict[str, object] = {
             "page_number": page_number,
             "regions": layout_regions,
         }
-        page_text = "\n\n".join(page_texts)
         return page_layout, page_text, warnings
 
     # ------------------------------------------------------------------
@@ -414,14 +418,14 @@ class DocumentPipeline:
         warnings: list[str] = []
 
         # Prepare pages (PDF or single image)
-        page_images: list[Image.Image] = []
+        pages: list[tuple[Image.Image, bytes]] = []
         if content_type == "application/pdf":
             rendered_pages, pdf_warnings = self.direct_pipeline._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
             for page_bytes in rendered_pages:
-                page_images.append(Image.open(io.BytesIO(page_bytes)).convert("RGB"))
+                pages.append((Image.open(io.BytesIO(page_bytes)).convert("RGB"), page_bytes))
         else:
-            page_images.append(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+            pages.append((Image.open(io.BytesIO(image_bytes)).convert("RGB"), image_bytes))
 
         # Get layout detector
         detector = self._get_detector(selected_layout_model, expert_layout_threshold)
@@ -430,10 +434,11 @@ class DocumentPipeline:
         layout: list[dict[str, object]] = []
         all_page_texts: list[str] = []
         page_infos: list[dict[str, object]] = []
-        for page_idx, page_image in enumerate(page_images):
+        for page_idx, (page_image, page_bytes) in enumerate(pages):
             page_number = page_idx + 1
             page_layout, page_text, page_warnings = await self._process_page(
                 page_image,
+                page_bytes,
                 model=selected_model,
                 detector=detector,
                 page_number=page_number,
