@@ -131,11 +131,11 @@
                   Direct
                 </option>
                 <option value="expert" {% if default_backend == "expert" %}selected{% endif %}>
-                  Dev (GLM-OCR)
+                  Dev
                 </option>
               </select>
               <span class="hint">
-                Dev nutzt GLM-OCR Layout-Pipeline (mit Ollama als OCR-Endpunkt), Direct nutzt den bestehenden Pfad.
+                Dev nutzt Layout-Erkennung mit regionenbasierter OCR via Ollama, Direct nutzt den bestehenden Pfad.
               </span>
             </label>
 
@@ -149,7 +149,7 @@
                 <option value="false">Aus</option>
               </select>
               <span class="hint">
-                Überschreibt pro Anfrage das GLM-OCR Layout-Flag (nur bei Modus Dev relevant).
+                Überschreibt pro Anfrage das Layout-Flag (nur bei Modus Dev relevant).
               </span>
             </label>
 
@@ -163,7 +163,7 @@
                 <option value="docling-project/docling-layout-heron-101">Docling Heron 101</option>
               </select>
               <span class="hint">
-                Layout-Erkennungsmodell für Dev-Modus. PP-DocLayout nutzt die interne GLM-OCR-Erkennung; andere HF-Modelle (AutoModelForObjectDetection) verwenden den generischen Detektor.
+                Layout-Erkennungsmodell für Dev-Modus. Unterstützt alle HuggingFace-Modelle mit AutoModelForObjectDetection.
               </span>
             </label>
 

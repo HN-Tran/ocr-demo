@@ -13,7 +13,7 @@ from app.api.routes import compat_router, router
 from app.config import Settings, get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
-from app.services.expert_pipeline import GLMOCRExpertPipeline
+from app.services.document_pipeline import DocumentPipeline
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
 
@@ -53,21 +53,19 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
     )
-    expert_pipeline = GLMOCRExpertPipeline(
+    document_pipeline = DocumentPipeline(
         direct_pipeline=ocr_pipeline,
+        ollama_client=ollama_client,
         default_model=settings.ollama_model,
-        mode=settings.ocr_expert_mode,
-        ocr_api_host=settings.ocr_expert_ocr_api_host,
-        ocr_api_port=settings.ocr_expert_ocr_api_port,
-        timeout_s=settings.request_timeout_s,
         enable_layout=settings.ocr_expert_enable_layout,
         layout_model=settings.ocr_expert_layout_model,
+        timeout_s=settings.request_timeout_s,
     )
     ocr_backend_router = OCRBackendRouter(
         default_backend=settings.ocr_backend,
         backends={
             "direct": ocr_pipeline,
-            "expert": expert_pipeline,
+            "expert": document_pipeline,
         },
     )
     app.state.ollama_client = ollama_client
