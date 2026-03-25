@@ -1104,118 +1104,56 @@ class GLMOCRExpertPipeline:
         lines = [re.sub(r"[ \t]+", " ", line).strip() for line in cleaned.splitlines()]
         return "\n".join(line for line in lines if line)
 
-    @staticmethod
-    def _parse_table_content(text: str) -> list[list[str]]:
-        """Parse a table (HTML or markdown) into a list of rows, each a list of cell strings."""
-        import re
-        from html import unescape
-
-        # Try HTML table parse: look for <tr>...</tr> rows with <td>/<th> cells.
-        if "<tr" in text.lower():
-            rows: list[list[str]] = []
-            for tr_match in re.finditer(
-                r"<tr[^>]*>(.*?)</tr>",
-                text,
-                re.IGNORECASE | re.DOTALL,
-            ):
-                tr_html = tr_match.group(1)
-                cells_text: list[str] = []
-                for cell_match in re.finditer(
-                    r"<(?:td|th)[^>]*>(.*?)</(?:td|th)>",
-                    tr_html,
-                    re.IGNORECASE | re.DOTALL,
-                ):
-                    cell_val = re.sub(r"<[^>]+>", "", cell_match.group(1))
-                    cells_text.append(unescape(cell_val).strip())
-                if cells_text:
-                    rows.append(cells_text)
-            if rows:
-                return rows
-
-        # Try markdown table parse: lines starting with |.
-        rows = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("|"):
-                continue
-            cells = [c.strip() for c in stripped.strip("|").split("|")]
-            if all(set(c) <= {"-", ":", " "} for c in cells if c):
-                continue
-            rows.append(cells)
-        return rows
-
-    @staticmethod
-    def _fill_cell_texts(
+    async def _ocr_table_cells(
+        self,
         cells: list[dict[str, object]],
-        content: str,
+        table_crop: Image.Image,
+        *,
+        model: str,
     ) -> None:
-        """Assign OCR text from *content* to cells by matching row/column indices.
+        """OCR each cell by cropping from the table image.
 
-        When the Table Transformer detects more rows or columns than the OCR
-        output contains, the grid is reconciled: excess detector rows/columns
-        are merged into the nearest OCR row/column so that text maps correctly.
+        Cell ``bbox_2d`` must still be in crop-relative pixel coords
+        (call this *before* converting to 0-1000 normalised coords).
         """
-        parsed_rows = GLMOCRExpertPipeline._parse_table_content(content)
-        if not parsed_rows:
-            parsed_rows = [[line.strip()] for line in content.splitlines() if line.strip()]
-        if not parsed_rows:
-            return
+        import io
 
-        ocr_row_count = len(parsed_rows)
-        ocr_col_count = max((len(row) for row in parsed_rows), default=0)
-        det_row_count = max((c.get("row", 0) for c in cells if isinstance(c.get("row"), int)), default=-1) + 1
-        det_col_count = max((c.get("column", 0) for c in cells if isinstance(c.get("column"), int)), default=-1) + 1
+        from app.services.ocr_pipeline import normalize_ocr_text_output
 
-        logger.info(
-            "Table grid: OCR %d×%d, detector %d×%d",
-            ocr_row_count,
-            ocr_col_count,
-            det_row_count,
-            det_col_count,
-        )
-
-        # Build mapping from detector indices to OCR indices.
-        # Evenly distributes detector indices across the OCR range.
-        def _build_index_map(det_count: int, ocr_count: int) -> dict[int, int]:
-            if det_count <= ocr_count:
-                return {i: i for i in range(det_count)}
-            mapping: dict[int, int] = {}
-            for det_idx in range(det_count):
-                ocr_idx = int(det_idx * ocr_count / det_count)
-                mapping[det_idx] = min(ocr_idx, ocr_count - 1)
-            return mapping
-
-        row_map = _build_index_map(det_row_count, ocr_row_count)
-        col_map = _build_index_map(det_col_count, ocr_col_count)
-
-        # Map detector indices to OCR indices and deduplicate.
-        seen: set[tuple[int, int]] = set()
-        to_remove: list[int] = []
-        for i, cell in enumerate(cells):
-            row_idx = cell.get("row", -1)
-            col_idx = cell.get("column", -1)
-            if not isinstance(row_idx, int) or not isinstance(col_idx, int):
+        ollama = self.direct_pipeline.ollama_client
+        prompt = "Read the text in this image. Return only the exact text, nothing else."
+        for cell in cells:
+            cb = cell.get("bbox_2d")
+            if not isinstance(cb, list) or len(cb) != 4:
                 continue
-            mapped_row = row_map.get(row_idx, row_idx)
-            mapped_col = col_map.get(col_idx, col_idx)
-            key = (mapped_row, mapped_col)
-            if key in seen:
-                to_remove.append(i)
+            cx1, cy1, cx2, cy2 = (
+                max(0, int(cb[0])),
+                max(0, int(cb[1])),
+                min(table_crop.width, int(cb[2])),
+                min(table_crop.height, int(cb[3])),
+            )
+            if cx2 - cx1 < 3 or cy2 - cy1 < 3:
                 continue
-            seen.add(key)
-            cell["row"] = mapped_row
-            cell["column"] = mapped_col
-            if 0 <= mapped_row < len(parsed_rows):
-                row_cells = parsed_rows[mapped_row]
-                if 0 <= mapped_col < len(row_cells):
-                    cell["content"] = row_cells[mapped_col]
-        for i in reversed(to_remove):
-            cells.pop(i)
+            cell_crop = table_crop.crop((cx1, cy1, cx2, cy2))
+            buf = io.BytesIO()
+            cell_crop.save(buf, format="PNG")
+            try:
+                raw = await ollama.run_ocr(
+                    image_bytes=buf.getvalue(),
+                    prompt=prompt,
+                    model=model,
+                    num_ctx=512,
+                )
+                cell["content"] = normalize_ocr_text_output(raw).strip()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Cell OCR failed: %s", exc)
 
-    def _enrich_table_regions(
+    async def _enrich_table_regions(
         self,
         layout: list[dict[str, object]],
         image: Image.Image,
+        *,
+        model: str,
     ) -> list[dict[str, object]]:
         """Add cell-level structure to table regions in *layout*."""
         img_w, img_h = image.size
@@ -1275,6 +1213,8 @@ class GLMOCRExpertPipeline:
                     )
                     if not cells:
                         continue
+                    # OCR each cell while bbox_2d is still in crop-relative pixels.
+                    await self._ocr_table_cells(cells, crop, model=model)
                     # Convert crop-relative pixel coords back to 0-1000.
                     for cell in cells:
                         cb = cell.get("bbox_2d")
@@ -1299,12 +1239,9 @@ class GLMOCRExpertPipeline:
                                 cell["bbox_2d"][0],
                                 cell["bbox_2d"][3],
                             ]
-                    # Map OCR text from region content into cells.
+                    # Replace raw HTML/markdown with plain text from cells.
                     content = str(region.get("content") or "")
                     if content:
-                        self._fill_cell_texts(cells, content)
-                        # Replace raw HTML/markdown with plain text now
-                        # that structured cells carry the content.
                         region["content"] = self._strip_table_markup(content)
                     region["cells"] = cells
                 except Exception as _exc:  # noqa: BLE001
@@ -1459,7 +1396,9 @@ class GLMOCRExpertPipeline:
                 try:
                     with Image.open(temp_path) as img:
                         img_rgb = img.convert("RGB")
-                        layout = self._enrich_table_regions(layout, img_rgb)
+                        layout = await self._enrich_table_regions(
+                            layout, img_rgb, model=selected_model
+                        )
                 except Exception as exc:  # noqa: BLE001
                     table_enrich_warning = f"Tabellenstruktur-Erkennung fehlgeschlagen: {exc}"
             page_infos = self._extract_page_infos(parse_result, layout=layout)
