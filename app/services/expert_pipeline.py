@@ -207,7 +207,7 @@ class GLMOCRExpertPipeline:
                     "cuda_visible_devices": "0",
                     "img_size": None,
                     "layout_nms": True,
-                    "layout_unclip_ratio": [1.05, 1.05],
+                    "layout_unclip_ratio": [1.0, 1.0],
                     "layout_merge_bboxes_mode": "large",
                     "label_task_mapping": {},
                     "id2label": None,
