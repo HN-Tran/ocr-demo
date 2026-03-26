@@ -28,7 +28,7 @@ class LayoutDetectorConfig:
     """Settings for :class:`HFLayoutDetector`."""
 
     model_dir: str
-    threshold: float = 0.4
+    threshold: float = 0.2
     threshold_by_class: dict[str, float] | None = None
     layout_nms: bool = True
     layout_unclip_ratio: list[float] | None = None

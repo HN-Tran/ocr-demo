@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from html import unescape
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
@@ -222,7 +222,7 @@ class DocumentPipeline:
         if detector is None:
             config = LayoutDetectorConfig(
                 model_dir=model,
-                threshold=threshold or 0.4,
+                threshold=threshold or 0.2,
                 layout_nms=True,
                 layout_unclip_ratio=[1.0, 1.0],
                 layout_merge_bboxes_mode="large",
@@ -242,15 +242,8 @@ class DocumentPipeline:
     # Per-region OCR
     # ------------------------------------------------------------------
 
-    async def _ocr_table_region(
-        self,
-        image: Image.Image,
-        region: dict[str, Any],
-        *,
-        model: str,
-    ) -> str:
-        """Crop and OCR a table region to get HTML table output."""
-        bbox = region.get("bbox_2d", [0, 0, 0, 0])
+    def _crop_region(self, image: Image.Image, bbox: list[float]) -> bytes | None:
+        """Crop a region from the image; return PNG bytes or None if too small."""
         img_w, img_h = image.size
         x1 = int(bbox[0] / 1000 * img_w)
         y1 = int(bbox[1] / 1000 * img_h)
@@ -259,15 +252,44 @@ class DocumentPipeline:
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(img_w, x2), min(img_h, y2)
         if x2 - x1 < 5 or y2 - y1 < 5:
-            return ""
-
+            return None
         crop = image.crop((x1, y1, x2, y2))
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
+        return buf.getvalue()
 
+    async def _ocr_table_region(
+        self,
+        image: Image.Image,
+        region: dict[str, Any],
+        *,
+        model: str,
+    ) -> str:
+        """Crop and OCR a table region to get HTML table output."""
+        crop_bytes = self._crop_region(image, region.get("bbox_2d", [0, 0, 0, 0]))
+        if not crop_bytes:
+            return ""
         raw = await self.ollama_client.run_ocr(
-            image_bytes=buf.getvalue(),
+            image_bytes=crop_bytes,
             prompt=_TABLE_PROMPT,
+            model=model,
+        )
+        return normalize_ocr_text_output(raw)
+
+    async def _ocr_text_region(
+        self,
+        image: Image.Image,
+        region: dict[str, Any],
+        *,
+        model: str,
+    ) -> str:
+        """Crop and OCR a text/formula region with the plain OCR prompt."""
+        crop_bytes = self._crop_region(image, region.get("bbox_2d", [0, 0, 0, 0]))
+        if not crop_bytes:
+            return ""
+        raw = await self.ollama_client.run_ocr(
+            image_bytes=crop_bytes,
+            prompt=self.direct_pipeline.plain_prompt_template,
             model=model,
         )
         return normalize_ocr_text_output(raw)
@@ -336,11 +358,17 @@ class DocumentPipeline:
                     layout_region["content"] = _strip_table_markup(table_html)
                 else:
                     layout_region["content"] = ""
-            else:
-                # Non-table regions don't need individual OCR; text comes from
-                # the full-page pass. We leave content empty — the full page
-                # text is the authoritative source.
+            elif task_type == "skip":
                 layout_region["content"] = ""
+            else:
+                # Text/formula regions: crop and OCR with plain prompt for layout view.
+                try:
+                    layout_region["content"] = await self._ocr_text_region(
+                        image, region, model=model
+                    )
+                except OllamaError as exc:
+                    warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
+                    layout_region["content"] = ""
 
             layout_regions.append(layout_region)
 
@@ -446,7 +474,7 @@ class DocumentPipeline:
             layout.append(page_layout)
             all_page_texts.append(page_text)
             warnings.extend(
-                f"Seite {page_number}: {w}" if len(page_images) > 1 else w
+                f"Seite {page_number}: {w}" if len(pages) > 1 else w
                 for w in page_warnings
             )
             page_infos.append({
@@ -469,7 +497,7 @@ class DocumentPipeline:
                 f"--- Seite {i + 1} ---\n{t}" for i, t in enumerate(all_page_texts)
             )
 
-        region_count = sum(len(p.get("regions", [])) for p in layout)
+        region_count = sum(len(cast(list, p.get("regions", []))) for p in layout)
         warnings.append(
             f"Document-Layout: {region_count} Regionen auf {len(layout)} Seite(n) erkannt."
         )
