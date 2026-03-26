@@ -21,6 +21,7 @@ dependencies = [
   "pillow>=12.1.0,<13.0.0",
   "pypdfium2>=5.6.0",
   "python-multipart>=0.0.9,<1.0.0",
+  "rapidfuzz>=3.14.3",
   "sentencepiece>=0.2.0,<1.0.0",
   "timm>=1.0.25",
   "transformers>=5.3.0,<6.0.0",

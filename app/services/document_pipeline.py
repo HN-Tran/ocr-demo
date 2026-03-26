@@ -1,8 +1,8 @@
 """Document analysis pipeline using HFLayoutDetector + Ollama.
 
 Replaces the GLM-OCR expert pipeline with a standalone implementation:
-layout detection via any HuggingFace model, per-region OCR via Ollama,
-and table cell extraction from HTML parsing.
+layout detection via any HuggingFace model, full-page OCR as ground truth,
+and per-region OCR with fuzzy matching back to the ground truth text.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ import re
 import time
 from html import unescape
 from typing import Any, cast
+
+from rapidfuzz import fuzz
 
 from PIL import Image
 
@@ -40,11 +42,6 @@ _FORMULA_LABELS = {
     "formula", "formula_caption", "formula_number",
     "equation_footnote", "isolate_formula", "Formula",
 }
-
-_TABLE_PROMPT = (
-    "Recognize the table in this image. Output the table as an HTML "
-    "<table> with <tr> and <td>/<th> tags. Preserve all cell content exactly."
-)
 
 
 def _classify_label(label: str) -> str:
@@ -188,6 +185,44 @@ def _sort_reading_order(regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Ground-truth matching
+# ---------------------------------------------------------------------------
+
+
+def _match_to_ground_truth(
+    candidate: str,
+    full_text: str,
+    threshold: float = 60.0,
+    max_window: int = 5,
+) -> str:
+    """Find the best matching passage in full_text for candidate.
+
+    Builds sliding windows of 1..max_window consecutive lines from full_text,
+    scores each with token_set_ratio, and returns the best match if it exceeds
+    threshold. Falls back to candidate if nothing scores high enough.
+    """
+    if not candidate or not full_text:
+        return candidate
+
+    lines = [l for l in full_text.splitlines() if l.strip()]
+    if not lines:
+        return candidate
+
+    best_score = 0.0
+    best_text = candidate
+
+    for win_size in range(1, min(max_window + 1, len(lines) + 1)):
+        for start in range(len(lines) - win_size + 1):
+            window = " ".join(lines[start : start + win_size])
+            score = fuzz.token_set_ratio(candidate, window)
+            if score > best_score:
+                best_score = score
+                best_text = window
+
+    return best_text if best_score >= threshold else candidate
+
+
+# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
@@ -258,32 +293,14 @@ class DocumentPipeline:
         crop.save(buf, format="PNG")
         return buf.getvalue()
 
-    async def _ocr_table_region(
+    async def _ocr_region(
         self,
         image: Image.Image,
         region: dict[str, Any],
         *,
         model: str,
     ) -> str:
-        """Crop and OCR a table region to get HTML table output."""
-        crop_bytes = self._crop_region(image, region.get("bbox_2d", [0, 0, 0, 0]))
-        if not crop_bytes:
-            return ""
-        raw = await self.ollama_client.run_ocr(
-            image_bytes=crop_bytes,
-            prompt=_TABLE_PROMPT,
-            model=model,
-        )
-        return normalize_ocr_text_output(raw)
-
-    async def _ocr_text_region(
-        self,
-        image: Image.Image,
-        region: dict[str, Any],
-        *,
-        model: str,
-    ) -> str:
-        """Crop and OCR a text/formula region with the plain OCR prompt."""
+        """Crop a region and OCR it with the plain prompt."""
         crop_bytes = self._crop_region(image, region.get("bbox_2d", [0, 0, 0, 0]))
         if not crop_bytes:
             return ""
@@ -327,7 +344,7 @@ class DocumentPipeline:
         raw_regions = detection_results[0] if detection_results else []
         regions = _sort_reading_order(raw_regions)
 
-        # 3. Build layout regions; OCR tables separately for HTML cell structure.
+        # 3. Build layout regions — crop OCR each, fuzzy-match against ground truth.
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
@@ -341,34 +358,17 @@ class DocumentPipeline:
                 "confidence": region.get("score"),
             }
 
-            # Table regions get a separate OCR call for HTML cell extraction.
-            if task_type == "table":
-                try:
-                    table_html = await self._ocr_table_region(image, region, model=model)
-                except OllamaError as exc:
-                    warnings.append(f"Region {idx} ({label}) Tabellen-OCR fehlgeschlagen: {exc}")
-                    table_html = ""
-                if table_html:
-                    parsed_rows = _parse_table_html(table_html)
-                    if parsed_rows:
-                        cells = _build_table_cells(
-                            parsed_rows, region.get("bbox_2d", [0, 0, 0, 0])
-                        )
-                        layout_region["cells"] = cells
-                    layout_region["content"] = _strip_table_markup(table_html)
-                else:
-                    layout_region["content"] = ""
-            elif task_type == "skip":
+            if task_type == "skip":
                 layout_region["content"] = ""
             else:
-                # Text/formula regions: crop and OCR with plain prompt for layout view.
                 try:
-                    layout_region["content"] = await self._ocr_text_region(
-                        image, region, model=model
-                    )
+                    candidate = await self._ocr_region(image, region, model=model)
                 except OllamaError as exc:
                     warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
-                    layout_region["content"] = ""
+                    candidate = ""
+                layout_region["content"] = (
+                    _match_to_ground_truth(candidate, page_text) if candidate else ""
+                )
 
             layout_regions.append(layout_region)
 
