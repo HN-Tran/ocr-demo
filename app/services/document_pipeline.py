@@ -193,13 +193,12 @@ def _match_to_ground_truth(
     candidate: str,
     full_text: str,
     threshold: float = 60.0,
-    max_window: int = 5,
 ) -> str:
     """Find the best matching passage in full_text for candidate.
 
-    Builds sliding windows of 1..max_window consecutive lines from full_text,
-    scores each with token_set_ratio, and returns the best match if it exceeds
-    threshold. Falls back to candidate if nothing scores high enough.
+    Anchors on where the first candidate line best matches in full_text, then
+    takes as many lines as the candidate has. Falls back to candidate if the
+    anchor score is below threshold.
     """
     if not candidate or not full_text:
         return candidate
@@ -208,18 +207,44 @@ def _match_to_ground_truth(
     if not lines:
         return candidate
 
-    best_score = 0.0
-    best_text = candidate
+    candidate_lines_list = [l for l in candidate.splitlines() if l.strip()]
+    if not candidate_lines_list:
+        return candidate
+    first_line = candidate_lines_list[0]
+    last_line = candidate_lines_list[-1]
 
-    for win_size in range(1, min(max_window + 1, len(lines) + 1)):
-        for start in range(len(lines) - win_size + 1):
-            window = " ".join(lines[start : start + win_size])
-            score = fuzz.token_set_ratio(candidate, window)
-            if score > best_score:
-                best_score = score
-                best_text = window
+    # Find the line in full_text where the first candidate line matches best.
+    best_start_score = 0.0
+    best_start = 0
+    for i, line in enumerate(lines):
+        score = fuzz.ratio(first_line, line)
+        if score > best_start_score:
+            best_start_score = score
+            best_start = i
 
-    return best_text if best_score >= threshold else candidate
+    if best_start_score < threshold:
+        return candidate
+
+    # Sequential alignment: advance through ground truth one candidate line at a time.
+    # For each candidate line, try joining 1..max_join consecutive ground truth lines
+    # to handle crop OCR (one row per line) vs full-page OCR (one value per line).
+    max_join = 6
+    gt_pos = best_start
+    for cand_line in candidate_lines_list[1:]:
+        best_line_score = 0.0
+        best_line_pos = gt_pos
+        lookahead = min(len(lines), gt_pos + max_join * 2)
+        for i in range(gt_pos, lookahead):
+            for join in range(1, min(max_join + 1, len(lines) - i + 1)):
+                window = " ".join(lines[i : i + join])
+                score = fuzz.ratio(cand_line, window)
+                if score > best_line_score:
+                    best_line_score = score
+                    best_line_pos = i + join - 1
+        if best_line_score >= threshold:
+            gt_pos = best_line_pos
+
+    return "\n".join(lines[best_start : gt_pos + 1])
 
 
 # ---------------------------------------------------------------------------
