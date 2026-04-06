@@ -1,8 +1,9 @@
 """Document analysis pipeline using HFLayoutDetector + Ollama.
 
 Replaces the GLM-OCR expert pipeline with a standalone implementation:
-layout detection via any HuggingFace model, full-page OCR as ground truth,
-and per-region OCR with fuzzy matching back to the ground truth text.
+layout detection via any HuggingFace model, full-page OCR as source text,
+per-region OCR with fuzzy matching back to the source text, and optional
+Table Transformer for precise cell bounding boxes.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from app.services.ocr_pipeline import (
     normalize_ocr_text_output,
 )
 from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.table_structure_recognizer import TableStructureRecognizer
+from app.services.word_detector import WordDetector, create_word_detector
 
 logger = logging.getLogger(__name__)
 
@@ -189,21 +192,21 @@ def _sort_reading_order(regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _match_to_ground_truth(
+def _match_to_source_text(
     candidate: str,
-    full_text: str,
+    source_text: str,
     threshold: float = 60.0,
 ) -> str:
-    """Find the best matching passage in full_text for candidate.
+    """Find the best matching passage in source_text for candidate.
 
-    Anchors on where the first candidate line best matches in full_text, then
+    Anchors on where the first candidate line best matches in source_text, then
     takes as many lines as the candidate has. Falls back to candidate if the
     anchor score is below threshold.
     """
-    if not candidate or not full_text:
+    if not candidate or not source_text:
         return candidate
 
-    lines = [l for l in full_text.splitlines() if l.strip()]
+    lines = [l for l in source_text.splitlines() if l.strip()]
     if not lines:
         return candidate
 
@@ -213,7 +216,7 @@ def _match_to_ground_truth(
     first_line = candidate_lines_list[0]
     last_line = candidate_lines_list[-1]
 
-    # Find the line in full_text where the first candidate line matches best.
+    # Find the line in source_text where the first candidate line matches best.
     best_start_score = 0.0
     best_start = 0
     for i, line in enumerate(lines):
@@ -225,8 +228,8 @@ def _match_to_ground_truth(
     if best_start_score < threshold:
         return candidate
 
-    # Sequential alignment: advance through ground truth one candidate line at a time.
-    # For each candidate line, try joining 1..max_join consecutive ground truth lines
+    # Sequential alignment: advance through source text one candidate line at a time.
+    # For each candidate line, try joining 1..max_join consecutive source text lines
     # to handle crop OCR (one row per line) vs full-page OCR (one value per line).
     max_join = 6
     gt_pos = best_start
@@ -248,6 +251,243 @@ def _match_to_ground_truth(
 
 
 # ---------------------------------------------------------------------------
+# Table Transformer cell remapping
+# ---------------------------------------------------------------------------
+
+
+def _remap_cells_to_page_coords(
+    cells: list[dict[str, Any]],
+    region_bbox: list[float],
+    crop_w: int,
+    crop_h: int,
+) -> list[dict[str, Any]]:
+    """Convert pixel-coord cell bboxes (relative to crop) to 0-1000 page coords."""
+    rx1, ry1, rx2, ry2 = region_bbox
+    rw = rx2 - rx1
+    rh = ry2 - ry1
+    remapped: list[dict[str, Any]] = []
+    for cell in cells:
+        cx1, cy1, cx2, cy2 = cell["bbox_2d"]
+        px1 = rx1 + (cx1 / crop_w) * rw
+        py1 = ry1 + (cy1 / crop_h) * rh
+        px2 = rx1 + (cx2 / crop_w) * rw
+        py2 = ry1 + (cy2 / crop_h) * rh
+        remapped.append({
+            **cell,
+            "bbox_2d": [px1, py1, px2, py2],
+            "polygon": [px1, py1, px2, py1, px2, py2, px1, py2],
+        })
+    return remapped
+
+
+# ---------------------------------------------------------------------------
+# Word-polygon content assignment
+# ---------------------------------------------------------------------------
+
+
+def _poly_centroid(polygon: list[float]) -> tuple[float, float]:
+    n = max(len(polygon) // 2, 1)
+    return sum(polygon[0::2]) / n, sum(polygon[1::2]) / n
+
+
+def _assign_word_content(
+    word_polys: list[dict[str, Any]],
+    regions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Assign text content to word polygons.
+
+    If a word polygon already has content from the detector (e.g. DocTR/PaddleOCR
+    recognition), keep it as-is.  For polygons without content, fall back to
+    assigning tokens from the containing layout region's OCR text in reading order.
+    """
+    result: list[dict[str, Any]] = [dict(wp) for wp in word_polys]
+
+    # If all polygons already carry detector-recognised content, nothing to do.
+    needs_assignment = [i for i, wp in enumerate(word_polys) if not wp.get("content")]
+    if not needs_assignment:
+        return result
+
+    # Group unassigned polygon indices by the region whose bbox most tightly contains them.
+    region_poly_indices: dict[int, list[int]] = {}
+    for poly_idx in needs_assignment:
+        wp = word_polys[poly_idx]
+        poly = wp["polygon"]
+        if not poly or len(poly) < 8:
+            continue
+            
+        x_c = poly[0::2]
+        y_c = poly[1::2]
+        px1, px2 = min(x_c), max(x_c)
+        py1, py2 = min(y_c), max(y_c)
+        word_area = max(1.0, (px2 - px1) * (py2 - py1))
+        
+        best: int | None = None
+        best_area = float("inf")
+        
+        for r_idx, region in enumerate(regions):
+            bbox = region.get("bbox_2d") or []
+            if len(bbox) != 4:
+                continue
+            rx1, ry1, rx2, ry2 = bbox
+            
+            ix1 = max(px1, rx1)
+            iy1 = max(py1, ry1)
+            ix2 = min(px2, rx2)
+            iy2 = min(py2, ry2)
+            
+            if ix1 < ix2 and iy1 < iy2:
+                intersection = (ix2 - ix1) * (iy2 - iy1)
+                ioa = intersection / word_area
+                
+                # If at least 10% of the word is inside this region, consider it a candidate.
+                if ioa > 0.1:
+                    area = (rx2 - rx1) * (ry2 - ry1)
+                    if area < best_area:
+                        best = r_idx
+                        best_area = area
+                        
+        if best is not None:
+            region_poly_indices.setdefault(best, []).append(poly_idx)
+
+    for r_idx, indices in region_poly_indices.items():
+        region_content = str(regions[r_idx].get("content") or "")
+        lines = [line.strip() for line in region_content.splitlines() if line.strip()]
+        
+        # Sort polygons by reading order using row-banding
+        band_tolerance = 15  # in 0-1000 normalised coords
+        centroids = {i: _poly_centroid(word_polys[i]["polygon"]) for i in indices}
+        by_y = sorted(indices, key=lambda i: centroids[i][1])
+        bands: list[list[int]] = []
+        current: list[int] = []
+        band_y = 0.0
+        for i in by_y:
+            cy = centroids[i][1]
+            if not current or abs(cy - band_y) <= band_tolerance:
+                current.append(i)
+                band_y = sum(centroids[j][1] for j in current) / len(current)
+            else:
+                bands.append(sorted(current, key=lambda j: centroids[j][0]))
+                current = [i]
+                band_y = cy
+        if current:
+            bands.append(sorted(current, key=lambda j: centroids[j][0]))
+        
+        # indices_sorted is a flat list of polygon indices in this region.
+        # Check if we should perform line-level proportional splitting.
+        flat_tokens = [t for line in lines for t in line.split()]
+        total_tokens = len(flat_tokens)
+        polys_in_region = sum(len(band) for band in bands)
+        
+        if polys_in_region > 0 and total_tokens > polys_in_region * 1.5:
+            # Reconstruct result polygons by splitting the bounding boxes
+            # We pair each band (row of polygons) with a chunk of text.
+            # Map each token chunk to its individual physical polygon
+            valid_bands = []
+            flat_poly_geometries = []
+            for band_indices in bands:
+                band_pgs = []
+                for p_idx in band_indices:
+                    poly = word_polys[p_idx]["polygon"]
+                    if len(poly) >= 8:
+                        x_c = poly[0::2]
+                        x1, x2 = min(x_c), max(x_c)
+                        poly_width = max(1.0, x2 - x1)
+                        
+                        # Filter out purely artefactual/noise lines
+                        if poly_width >= 5:
+                            pg = {
+                                "width": poly_width,
+                                "poly": poly,
+                                "confidence": word_polys[p_idx].get("confidence", 1.0)
+                            }
+                            band_pgs.append(pg)
+                            flat_poly_geometries.append(pg)
+                    result[p_idx]["polygon"] = []  # ALWAYS clear original from result array
+                if band_pgs:
+                    valid_bands.append(band_pgs)
+            
+            def _distribute_tokens(tokens_list, pgs_list):
+                if not tokens_list or not pgs_list:
+                    return
+
+                # Proportional font width approximation to prevent wide/narrow letter box drift
+                def _char_width(c: str) -> float:
+                    cl = c.lower()
+                    if cl in "il1.,'!;:|": return 0.25
+                    if cl in "tfj()[]{}": return 0.45
+                    if cl in "mw": return 1.45
+                    if cl in "abcdegknopqrsuyz": return 0.9
+                    if cl in "xhv": return 0.95
+                    return 1.0
+                def _tok_width(tok: str) -> float:
+                    return sum(_char_width(c) for c in tok)
+                space_width = 1.6
+                left_margin = 0.5
+                right_margin = 2.0
+
+                t_width = sum(pg["width"] for pg in pgs_list)
+                t_chars = sum(_tok_width(t) for t in tokens_list) + len(tokens_list) * space_width + left_margin + right_margin
+
+                t_idx = 0
+                for i, pg in enumerate(pgs_list):
+                    if i == len(pgs_list) - 1:
+                        poly_tokens = tokens_list[t_idx:]
+                    else:
+                        target_chars = t_chars * (pg["width"] / max(1.0, t_width))
+                        current_chars = 0
+                        poly_tokens = []
+                        while t_idx < len(tokens_list):
+                            tok = tokens_list[t_idx]
+                            tok_w = _tok_width(tok) + (space_width if current_chars > 0 else 0)
+                            if current_chars > 0 and current_chars + tok_w - target_chars > target_chars - current_chars:
+                                break
+                            poly_tokens.append(tok)
+                            current_chars += tok_w
+                            t_idx += 1
+
+                    if not poly_tokens:
+                        continue
+
+                    px1, py1, px2, py2, px3, py3, px4, py4 = pg["poly"]
+                    dx_top, dy_top = px2 - px1, py2 - py1
+                    dx_bot, dy_bot = px3 - px4, py3 - py4
+
+                    b_total_len = sum(_tok_width(t) for t in poly_tokens) + max(0, len(poly_tokens) - 1) * space_width + left_margin + right_margin
+                    b_current_len = left_margin
+                    for tok_i, token in enumerate(poly_tokens):
+                        s_r = b_current_len / max(1.0, b_total_len)
+                        b_current_len += _tok_width(token)
+                        e_r = b_current_len / max(1.0, b_total_len)
+                        if tok_i < len(poly_tokens) - 1:
+                            b_current_len += space_width
+                        sub_poly = [
+                            px1 + dx_top * s_r, py1 + dy_top * s_r,
+                            px1 + dx_top * e_r, py1 + dy_top * e_r,
+                            px4 + dx_bot * e_r, py4 + dy_bot * e_r,
+                            px4 + dx_bot * s_r, py4 + dy_bot * s_r,
+                        ]
+                        result.append({"polygon": sub_poly, "content": token, "confidence": pg["confidence"]})
+
+            # If Ollama provided exactly as many lines as we have visual layout bands,
+            # we can perfectly match line tokens to line polygons, preventing cascading overflow!
+            if len(lines) > 0 and len(valid_bands) == len(lines):
+                for b_i, band_pgs in enumerate(valid_bands):
+                    band_tokens = lines[b_i].split()
+                    _distribute_tokens(band_tokens, band_pgs)
+            else:
+                # Fall back to distributing all tokens mathematically across all raw geometries
+                _distribute_tokens(flat_tokens, flat_poly_geometries)
+        else:
+            # 1-to-1 fallback mapping
+            indices_sorted = [i for band in bands for i in band]
+            for token_idx, poly_idx in enumerate(indices_sorted):
+                if poly_idx < len(result):
+                    result[poly_idx]["content"] = flat_tokens[token_idx] if token_idx < len(flat_tokens) else ""
+
+    return [r for r in result if r and r.get("polygon")]
+
+
+# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
@@ -264,6 +504,8 @@ class DocumentPipeline:
         enable_layout: bool,
         layout_model: str,
         timeout_s: float,
+        enable_table_transformer: bool = False,
+        word_detector: WordDetector | None = None,
     ) -> None:
         self.direct_pipeline = direct_pipeline
         self.ollama_client = ollama_client
@@ -271,7 +513,11 @@ class DocumentPipeline:
         self.enable_layout = enable_layout
         self.layout_model = layout_model
         self.timeout_s = timeout_s
+        self.enable_table_transformer = enable_table_transformer
+        self.word_detector: WordDetector | None = word_detector
         self._detector_cache: dict[str, HFLayoutDetector] = {}
+        self._table_recognizer: TableStructureRecognizer | None = None
+        self._word_detector_cache: dict[str, WordDetector | None] = {}
 
     # ------------------------------------------------------------------
     # Detector management
@@ -299,6 +545,16 @@ class DocumentPipeline:
         return detector
 
     # ------------------------------------------------------------------
+    # Table Transformer
+    # ------------------------------------------------------------------
+
+    def _get_table_recognizer(self) -> TableStructureRecognizer:
+        if self._table_recognizer is None:
+            self._table_recognizer = TableStructureRecognizer()
+            self._table_recognizer.start()
+        return self._table_recognizer
+
+    # ------------------------------------------------------------------
     # Per-region OCR
     # ------------------------------------------------------------------
 
@@ -317,6 +573,19 @@ class DocumentPipeline:
         buf = io.BytesIO()
         crop.save(buf, format="PNG")
         return buf.getvalue()
+
+    def _crop_region_image(self, image: Image.Image, bbox: list[float]) -> Image.Image | None:
+        """Crop a region from the image; return PIL Image or None if too small."""
+        img_w, img_h = image.size
+        x1 = int(bbox[0] / 1000 * img_w)
+        y1 = int(bbox[1] / 1000 * img_h)
+        x2 = int(bbox[2] / 1000 * img_w)
+        y2 = int(bbox[3] / 1000 * img_h)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(img_w, x2), min(img_h, y2)
+        if x2 - x1 < 5 or y2 - y1 < 5:
+            return None
+        return image.crop((x1, y1, x2, y2))
 
     async def _ocr_region(
         self,
@@ -348,6 +617,7 @@ class DocumentPipeline:
         model: str,
         detector: HFLayoutDetector,
         page_number: int,
+        use_table_transformer: bool = False,
     ) -> tuple[dict[str, object], str, list[str]]:
         """Full-page OCR + layout detection, return (page_layout, page_text, warnings)."""
         warnings: list[str] = []
@@ -369,7 +639,7 @@ class DocumentPipeline:
         raw_regions = detection_results[0] if detection_results else []
         regions = _sort_reading_order(raw_regions)
 
-        # 3. Build layout regions — crop OCR each, fuzzy-match against ground truth.
+        # 3. Build layout regions — crop OCR each, fuzzy-match against source text.
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
@@ -392,8 +662,24 @@ class DocumentPipeline:
                     warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
                     candidate = ""
                 layout_region["content"] = (
-                    _match_to_ground_truth(candidate, page_text) if candidate else ""
+                    _match_to_source_text(candidate, page_text) if candidate else ""
                 )
+
+                # Table Transformer: detect precise cell bboxes for table regions.
+                if task_type == "table" and use_table_transformer:
+                    crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
+                    if crop_img is not None:
+                        try:
+                            raw_cells = self._get_table_recognizer().recognize(crop_img)
+                            if raw_cells:
+                                layout_region["cells"] = _remap_cells_to_page_coords(
+                                    raw_cells,
+                                    region.get("bbox_2d", [0, 0, 0, 0]),
+                                    crop_img.width,
+                                    crop_img.height,
+                                )
+                        except Exception as exc:  # noqa: BLE001
+                            warnings.append(f"Region {idx} Table Transformer fehlgeschlagen: {exc}")
 
             layout_regions.append(layout_region)
 
@@ -422,6 +708,8 @@ class DocumentPipeline:
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> OCRResult:
         selected_model = (model or "").strip() or self.default_model
         selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
@@ -429,6 +717,23 @@ class DocumentPipeline:
             self.enable_layout if expert_enable_layout is None else expert_enable_layout
         )
         selected_layout_model = (expert_layout_model or "").strip() or self.layout_model
+        selected_table_transformer = (
+            self.enable_table_transformer
+            if expert_table_transformer is None
+            else expert_table_transformer
+        )
+        selected_word_detector: WordDetector | None = self.word_detector
+        word_detector_warning: str | None = None
+        if expert_word_detector is not None and expert_word_detector != "":
+            key = expert_word_detector.strip().lower()
+            if key not in self._word_detector_cache:
+                try:
+                    self._word_detector_cache[key] = create_word_detector(expert_word_detector)
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Wort-Detektor-Initialisierung fehlgeschlagen: %s", exc)
+                    word_detector_warning = f"Wort-Detektor nicht verfügbar: {exc}"
+                    self._word_detector_cache[key] = None
+            selected_word_detector = self._word_detector_cache[key]
 
         # Fallback to direct pipeline for unsupported modes
         if mode != "plain":
@@ -469,6 +774,8 @@ class DocumentPipeline:
 
         start = time.perf_counter()
         warnings: list[str] = []
+        if word_detector_warning:
+            warnings.append(word_detector_warning)
 
         # Prepare pages (PDF or single image)
         pages: list[tuple[Image.Image, bytes]] = []
@@ -495,7 +802,16 @@ class DocumentPipeline:
                 model=selected_model,
                 detector=detector,
                 page_number=page_number,
+                use_table_transformer=selected_table_transformer,
             )
+            if selected_word_detector is not None:
+                try:
+                    word_polys = selected_word_detector.detect(page_image)
+                    page_layout["word_polys"] = _assign_word_content(
+                        word_polys, cast(list, page_layout.get("regions", []))
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Wort-Erkennung fehlgeschlagen: {exc}")
             layout.append(page_layout)
             all_page_texts.append(page_text)
             warnings.extend(

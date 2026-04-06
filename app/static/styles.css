@@ -896,86 +896,267 @@ pre {
 
 .preview-layout-box[data-region-kind="text"],
 .preview-layout-shape[data-region-kind="text"],
-.layout-region-item[data-region-kind="text"] {
+.layout-region-item[data-region-kind="text"],
+.word-region-group[data-region-kind="text"],
+.preview-word-shape[data-region-kind="text"] {
   --layout-region-accent: color-mix(in srgb, #ef6c47 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #ef6c47 12%, transparent);
 }
 
 .preview-layout-box[data-region-kind="table"],
 .preview-layout-shape[data-region-kind="table"],
-.layout-region-item[data-region-kind="table"] {
+.layout-region-item[data-region-kind="table"],
+.word-region-group[data-region-kind="table"],
+.preview-word-shape[data-region-kind="table"] {
   --layout-region-accent: color-mix(in srgb, #1b8f5a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #1b8f5a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="title"],
 .preview-layout-shape[data-region-kind="title"],
-.layout-region-item[data-region-kind="title"] {
+.layout-region-item[data-region-kind="title"],
+.word-region-group[data-region-kind="title"],
+.preview-word-shape[data-region-kind="title"] {
   --layout-region-accent: color-mix(in srgb, #c95f1a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #c95f1a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="figure"],
 .preview-layout-shape[data-region-kind="figure"],
-.layout-region-item[data-region-kind="figure"] {
+.layout-region-item[data-region-kind="figure"],
+.word-region-group[data-region-kind="figure"],
+.preview-word-shape[data-region-kind="figure"] {
   --layout-region-accent: color-mix(in srgb, #2b79c2 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #2b79c2 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="caption"],
 .preview-layout-shape[data-region-kind="caption"],
-.layout-region-item[data-region-kind="caption"] {
+.layout-region-item[data-region-kind="caption"],
+.word-region-group[data-region-kind="caption"],
+.preview-word-shape[data-region-kind="caption"] {
   --layout-region-accent: color-mix(in srgb, #7d67c8 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #7d67c8 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="list"],
 .preview-layout-shape[data-region-kind="list"],
-.layout-region-item[data-region-kind="list"] {
+.layout-region-item[data-region-kind="list"],
+.word-region-group[data-region-kind="list"],
+.preview-word-shape[data-region-kind="list"] {
   --layout-region-accent: color-mix(in srgb, #9b7d16 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #9b7d16 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="header"],
 .preview-layout-shape[data-region-kind="header"],
-.layout-region-item[data-region-kind="header"] {
+.layout-region-item[data-region-kind="header"],
+.word-region-group[data-region-kind="header"],
+.preview-word-shape[data-region-kind="header"] {
   --layout-region-accent: color-mix(in srgb, #0c8a8a 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #0c8a8a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="footer"],
 .preview-layout-shape[data-region-kind="footer"],
-.layout-region-item[data-region-kind="footer"] {
+.layout-region-item[data-region-kind="footer"],
+.word-region-group[data-region-kind="footer"],
+.preview-word-shape[data-region-kind="footer"] {
   --layout-region-accent: color-mix(in srgb, #8b6f62 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #8b6f62 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="formula"],
 .preview-layout-shape[data-region-kind="formula"],
-.layout-region-item[data-region-kind="formula"] {
+.layout-region-item[data-region-kind="formula"],
+.word-region-group[data-region-kind="formula"],
+.preview-word-shape[data-region-kind="formula"] {
   --layout-region-accent: color-mix(in srgb, #b1497f 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #b1497f 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="code"],
 .preview-layout-shape[data-region-kind="code"],
-.layout-region-item[data-region-kind="code"] {
+.layout-region-item[data-region-kind="code"],
+.word-region-group[data-region-kind="code"],
+.preview-word-shape[data-region-kind="code"] {
   --layout-region-accent: color-mix(in srgb, #5753c6 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #5753c6 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="signature"],
 .preview-layout-shape[data-region-kind="signature"],
-.layout-region-item[data-region-kind="signature"] {
+.layout-region-item[data-region-kind="signature"],
+.word-region-group[data-region-kind="signature"],
+.preview-word-shape[data-region-kind="signature"] {
   --layout-region-accent: color-mix(in srgb, #b55b2d 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #b55b2d 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="other"],
 .preview-layout-shape[data-region-kind="other"],
-.layout-region-item[data-region-kind="other"] {
+.layout-region-item[data-region-kind="other"],
+.word-region-group[data-region-kind="other"],
+.preview-word-shape[data-region-kind="other"] {
   --layout-region-accent: color-mix(in srgb, #6a7280 82%, #fff 18%);
   --layout-region-fill: color-mix(in srgb, #6a7280 12%, transparent);
+}
+
+/* Word-mode sidebar */
+.word-region-group {
+  --layout-region-accent: color-mix(in srgb, #6a7280 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #6a7280 10%, transparent);
+  display: grid;
+  gap: 0.25rem;
+  border-left: 0.28rem solid var(--layout-region-accent);
+  border-radius: 0.55rem;
+  background: var(--layout-region-fill);
+  padding: 0.42rem 0.5rem 0.42rem 0.72rem;
+}
+
+.word-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.4rem;
+}
+
+.word-item {
+  font-size: 0.82rem;
+  color: var(--ink);
+  padding: 0.06rem 0.3rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--layout-region-accent) 10%, transparent);
+}
+
+/* Word polygon overlay */
+.preview-word-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  z-index: 2;
+}
+
+.preview-word-shape {
+  --layout-region-accent: color-mix(in srgb, #6a7280 82%, #fff 18%);
+  fill: none;
+  stroke: var(--layout-region-accent);
+  stroke-width: 0.4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Diff overlay shapes */
+.preview-diff-shape-ours {
+  fill: color-mix(in srgb, #f59e0b 12%, transparent);
+  stroke: #f59e0b;
+  stroke-width: 0.2;
+  vector-effect: non-scaling-stroke;
+}
+.preview-diff-shape-azure {
+  fill: color-mix(in srgb, #3b82f6 12%, transparent);
+  stroke: #3b82f6;
+  stroke-width: 0.2;
+  vector-effect: non-scaling-stroke;
+}
+.preview-diff-shape-missing {
+  fill: color-mix(in srgb, #ef4444 18%, transparent);
+  stroke: #ef4444;
+  stroke-width: 0.3;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Compare section */
+#compare-section {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--pre-bg);
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+#compare-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.compare-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.compare-form input {
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.compare-diff-summary {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.compare-diff-summary b {
+  color: var(--ink);
+}
+
+.compare-text-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.compare-text-panel {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.compare-text-panel h4 {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.compare-text-panel pre {
+  margin: 0;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.78rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Word toggle button */
+.layout-toggle-btn {
+  padding: 0.18rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.layout-toggle-btn[aria-pressed="true"] {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
 }
 
 .layout-visualizations {

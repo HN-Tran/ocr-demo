@@ -85,6 +85,8 @@ class FakeBackendRouter:
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -100,6 +102,8 @@ class FakeBackendRouter:
             "gif_max_frames": gif_max_frames,
             "expert_enable_layout": expert_enable_layout,
             "expert_layout_model": expert_layout_model,
+            "expert_table_transformer": expert_table_transformer,
+            "expert_word_detector": expert_word_detector,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
@@ -186,6 +190,8 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -200,6 +206,8 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
         result.page_infos = None
         result.layout = None
@@ -571,12 +579,12 @@ def test_ocr_forwards_backend_choice() -> None:
                     "polygon": [
                         100.0,
                         120.0,
-                        463.6363636363636,
+                        454.54545454545456,
+                        129.0909090909091,
+                        474.5454545454545,
+                        249.09090909090907,
                         120.0,
-                        463.6363636363636,
-                        260.0,
-                        100.0,
-                        260.0,
+                        240.0,
                     ],
                 },
                 {
@@ -584,14 +592,14 @@ def test_ocr_forwards_backend_choice() -> None:
                     "span": {"offset": 6, "length": 5},
                     "confidence": 0.96,
                     "polygon": [
-                        536.3636363636364,
-                        120.0,
-                        900.0,
-                        120.0,
+                        525.4545454545454,
+                        130.9090909090909,
+                        880.0,
+                        140.0,
                         900.0,
                         260.0,
-                        536.3636363636364,
-                        260.0,
+                        545.4545454545454,
+                        250.9090909090909,
                     ],
                 },
             ],

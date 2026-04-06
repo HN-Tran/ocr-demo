@@ -36,6 +36,8 @@ class OCRBackendRouter:
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> tuple[OCRResult, str]:
         requested_backend = (
             self.default_backend if backend is None else self.normalize_backend(backend)
@@ -58,5 +60,7 @@ class OCRBackendRouter:
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
         return result, requested_backend

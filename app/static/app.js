@@ -2,16 +2,6 @@ const form = document.getElementById("ocr-form");
 const pageEl = document.querySelector(".page");
 const fileEl = document.getElementById("file");
 const modeEl = document.getElementById("mode");
-const taskEl = document.getElementById("task");
-const customPromptEl = document.getElementById("custom_prompt");
-const schemaNameEl = document.getElementById("schema_name");
-const backendEl = document.getElementById("backend");
-const expertEnableLayoutEl = document.getElementById("expert_enable_layout");
-const expertLayoutModelEl = document.getElementById("expert_layout_model");
-const expertLayoutThresholdEl = document.getElementById("expert_layout_threshold");
-const modelEl = document.getElementById("model");
-const tokenLimitEl = document.getElementById("token_limit");
-const gifMaxFramesEl = document.getElementById("gif_max_frames");
 const applyOptionsBtnEl = document.getElementById("apply-options-btn");
 const advancedDirtyHintEl = document.getElementById("advanced-dirty-hint");
 const taskWrap = document.getElementById("task-wrap");
@@ -55,8 +45,18 @@ const layoutWrapEl = document.getElementById("layout-wrap");
 const layoutSummaryEl = document.getElementById("layout-summary");
 const layoutPagesEl = document.getElementById("layout-pages");
 const layoutVisualizationsEl = document.getElementById("layout-visualizations");
+const wordToggleBtnEl = document.getElementById("word-toggle-btn");
+const compareSectionEl = document.getElementById("compare-section");
+const compareFormEl = document.getElementById("compare-form");
+const azureEndpointEl = document.getElementById("azure-endpoint");
+const azureKeyEl = document.getElementById("azure-key");
+const compareSummaryEl = document.getElementById("compare-summary");
+const compareTextDiffEl = document.getElementById("compare-text-diff");
+const compareOurTextEl = document.getElementById("compare-our-text");
+const compareAzureTextEl = document.getElementById("compare-azure-text");
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
+const compareEndpoint = `${appBasePath}/api/compare`;
 
 let lastResponse = null;
 let lastTableMatrices = [];
@@ -658,6 +658,207 @@ function renderLayoutOverlay(layoutPages) {
   });
 
   previewLayoutOverlayEl.classList.toggle("hidden", overlayCount === 0);
+}
+
+// Assign each word to the first region whose bbox_2d contains the word's polygon center.
+// Returns annotated words with regionLabel and regionKind added.
+function assignWordsToRegions(words, regions) {
+  return words.map((word) => {
+    const poly = word.polygon;
+    if (!Array.isArray(poly) || poly.length < 8) {
+      return { ...word, regionLabel: "Unbekannt", regionKind: "other" };
+    }
+    const scale = getLayoutCoordinateScale(poly);
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    
+    for (let i = 0; i < poly.length; i += 2) {
+      const px = poly[i] / scale;
+      const py = poly[i + 1] / scale;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+    const rawWordArea = (maxX - minX) * (maxY - minY);
+    const wordArea = rawWordArea > 0 ? rawWordArea : 0.000001;
+
+    let bestRegion = null;
+    let bestArea = Infinity;
+
+    for (const region of regions) {
+      if (!Array.isArray(region.bbox_2d) || region.bbox_2d.length !== 4) continue;
+      const vals = region.bbox_2d.map(Number);
+      const rs = getLayoutCoordinateScale(vals);
+      const [x1, y1, x2, y2] = vals.map((v) => v / rs);
+      
+      const ix1 = Math.max(minX, x1);
+      const iy1 = Math.max(minY, y1);
+      const ix2 = Math.min(maxX, x2);
+      const iy2 = Math.min(maxY, y2);
+      
+      if (ix1 < ix2 && iy1 < iy2) {
+        const intersection = (ix2 - ix1) * (iy2 - iy1);
+        const ioa = intersection / wordArea;
+        if (ioa > 0.1) {
+          const area = (x2 - x1) * (y2 - y1);
+          if (area < bestArea) {
+            bestArea = area;
+            bestRegion = region;
+          }
+        }
+      }
+    }
+    
+    if (bestRegion) {
+      const label = bestRegion.label || "Region";
+      return { ...word, regionLabel: label, regionKind: normalizeLayoutRegionKind(label) };
+    }
+    return { ...word, regionLabel: "Unbekannt", regionKind: "other" };
+  });
+}
+
+function renderWordOverlay(annotatedWords) {
+  const existing = previewLayoutOverlayEl.querySelector(".preview-word-svg");
+  if (existing) existing.remove();
+  if (!annotatedWords || annotatedWords.length === 0) return;
+
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svgEl = document.createElementNS(svgNs, "svg");
+  svgEl.setAttribute("viewBox", "0 0 100 100");
+  svgEl.setAttribute("preserveAspectRatio", "none");
+  svgEl.classList.add("preview-layout-svg", "preview-word-svg");
+  previewLayoutOverlayEl.appendChild(svgEl);
+
+  annotatedWords.forEach((word) => {
+    const points = normalizedPolygonToPercentages(word.polygon);
+    if (!points) return;
+    const shapeEl = document.createElementNS(svgNs, "polygon");
+    shapeEl.classList.add("preview-word-shape");
+    if (word.regionKind) shapeEl.dataset.regionKind = word.regionKind;
+    shapeEl.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
+    shapeEl.title = word.content ? `${word.regionLabel}: ${word.content}` : (word.regionLabel || "");
+    svgEl.appendChild(shapeEl);
+  });
+}
+
+function renderWordSidebar(annotatedWords, regions) {
+  layoutPagesEl.innerHTML = "";
+
+  // Build ordered groups from regions, then a catch-all
+  const groupOrder = regions.map((r) => r.label || "Region");
+  const seen = new Set();
+  const groups = [];
+  for (const label of groupOrder) {
+    if (seen.has(label)) continue;
+    seen.add(label);
+    groups.push({ label, regionKind: normalizeLayoutRegionKind(label), words: [] });
+  }
+  const unknownGroup = { label: "Unbekannt", regionKind: "other", words: [] };
+
+  for (const word of annotatedWords) {
+    const group = groups.find((g) => g.label === word.regionLabel);
+    if (group) {
+      group.words.push(word);
+    } else {
+      unknownGroup.words.push(word);
+    }
+  }
+  if (unknownGroup.words.length > 0) groups.push(unknownGroup);
+
+  for (const group of groups) {
+    if (group.words.length === 0) continue;
+    const sectionEl = document.createElement("div");
+    sectionEl.className = "word-region-group";
+    sectionEl.dataset.regionKind = group.regionKind;
+
+    const headEl = document.createElement("strong");
+    headEl.className = "layout-region-label";
+    headEl.dataset.regionKind = group.regionKind;
+    headEl.textContent = `${group.label} (${group.words.length})`;
+    sectionEl.appendChild(headEl);
+
+    const listEl = document.createElement("ul");
+    listEl.className = "word-list";
+    group.words.forEach((word) => {
+      const li = document.createElement("li");
+      li.className = "word-item";
+      li.textContent = word.content || "";
+      listEl.appendChild(li);
+    });
+    sectionEl.appendChild(listEl);
+    layoutPagesEl.appendChild(sectionEl);
+  }
+}
+
+function applyWordMode(active, layoutPages) {
+  const layoutSvgEls = previewLayoutOverlayEl.querySelectorAll(
+    ".preview-layout-svg:not(.preview-word-svg)"
+  );
+  const layoutBoxEls = previewLayoutOverlayEl.querySelectorAll(".preview-layout-box");
+
+  if (active) {
+    layoutSvgEls.forEach((el) => el.classList.add("hidden"));
+    layoutBoxEls.forEach((el) => el.classList.add("hidden"));
+
+    const regions = layoutPages?.[0]?.regions || [];
+    const rawWordPolys = layoutPages?.[0]?.word_polys;
+    let annotatedWords;
+    if (rawWordPolys && rawWordPolys.length > 0) {
+      // Use detector-provided word polygons; no text content available.
+      const detectorWords = rawWordPolys.map((wp) => ({ polygon: wp.polygon, content: wp.content || "" }));
+      annotatedWords = assignWordsToRegions(detectorWords, regions);
+    } else {
+      const words = lastResponse?.analyzeResult?.pages?.[0]?.words || [];
+      annotatedWords = assignWordsToRegions(words, regions);
+    }
+    renderWordOverlay(annotatedWords);
+    renderWordSidebar(annotatedWords, regions);
+  } else {
+    layoutSvgEls.forEach((el) => el.classList.remove("hidden"));
+    layoutBoxEls.forEach((el) => el.classList.remove("hidden"));
+
+    const existing = previewLayoutOverlayEl.querySelector(".preview-word-svg");
+    if (existing) existing.remove();
+
+    // Restore region sidebar
+    const lp = layoutPages || normalizeLayoutPages(lastResponse?.layout);
+    renderLayoutPanel(lp, lastResponse?.layout_visualizations);
+  }
+}
+
+function renderDiffOverlay(onlyOurs, onlyAzure) {
+  // Remove any existing diff SVG layer
+  const existing = previewLayoutOverlayEl.querySelector(".preview-diff-svg");
+  if (existing) existing.remove();
+  if (!onlyOurs && !onlyAzure) return;
+
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svgEl = document.createElementNS(svgNs, "svg");
+  svgEl.setAttribute("viewBox", "0 0 100 100");
+  svgEl.setAttribute("preserveAspectRatio", "none");
+  svgEl.classList.add("preview-layout-svg", "preview-diff-svg");
+  previewLayoutOverlayEl.appendChild(svgEl);
+
+  (onlyOurs || []).forEach((w) => {
+    const points = normalizedPolygonToPercentages(w.polygon);
+    if (!points) return;
+    const el = document.createElementNS(svgNs, "polygon");
+    el.classList.add("preview-diff-shape-ours");
+    el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
+    el.title = `Nur wir: ${w.content || ""}`;
+    svgEl.appendChild(el);
+  });
+
+  (onlyAzure || []).forEach((w) => {
+    const points = normalizedPolygonToPercentages(w.polygon);
+    if (!points) return;
+    const el = document.createElementNS(svgNs, "polygon");
+    el.classList.add("preview-diff-shape-missing");
+    el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
+    el.title = `Nur Azure: ${w.content || ""}`;
+    svgEl.appendChild(el);
+  });
 }
 
 function renderLayoutVisualizations(visualizations) {
@@ -1422,6 +1623,12 @@ async function runOCR() {
       const layoutPages = normalizeLayoutPages(data.layout);
       renderLayoutPanel(layoutPages, data.layout_visualizations);
       renderLayoutOverlay(layoutPages);
+      // Reset word toggle and diff overlay on new result
+      wordToggleBtnEl.setAttribute("aria-pressed", "false");
+      renderDiffOverlay([], []);
+      compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
+      compareSummaryEl.classList.add("hidden");
+      compareTextDiffEl.classList.add("hidden");
       configurePlainResultViews({
         hasLayout:
           layoutPages.length > 0 ||
@@ -1592,36 +1799,11 @@ previewImageEl.addEventListener("error", () => {
 });
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();
+});
+advancedPanelEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
-taskEl.addEventListener("change", () => {
-  setAdvancedDirty(true);
-});
-schemaNameEl.addEventListener("change", () => {
-  setAdvancedDirty(true);
-});
-backendEl.addEventListener("change", () => {
-  setAdvancedDirty(true);
-});
-expertEnableLayoutEl.addEventListener("change", () => {
-  setAdvancedDirty(true);
-});
-expertLayoutModelEl.addEventListener("change", () => {
-  setAdvancedDirty(true);
-});
-expertLayoutThresholdEl.addEventListener("input", () => {
-  setAdvancedDirty(true);
-});
-modelEl.addEventListener("input", () => {
-  setAdvancedDirty(true);
-});
-tokenLimitEl.addEventListener("input", () => {
-  setAdvancedDirty(true);
-});
-gifMaxFramesEl.addEventListener("input", () => {
-  setAdvancedDirty(true);
-});
-customPromptEl.addEventListener("input", () => {
+advancedPanelEl.addEventListener("input", () => {
   setAdvancedDirty(true);
 });
 form.addEventListener("submit", (event) => {
@@ -1677,6 +1859,68 @@ downloadBtn.addEventListener("click", () => {
   link.download = "ocr-ergebnis.json";
   link.click();
   URL.revokeObjectURL(url);
+});
+
+// Word polygon toggle
+wordToggleBtnEl.addEventListener("click", () => {
+  const active = wordToggleBtnEl.getAttribute("aria-pressed") === "true";
+  const next = !active;
+  wordToggleBtnEl.setAttribute("aria-pressed", String(next));
+  const layoutPages = normalizeLayoutPages(lastResponse?.layout);
+  applyWordMode(next, layoutPages);
+});
+
+// Compare with Azure endpoint
+compareFormEl.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const endpoint = azureEndpointEl.value.trim();
+  const key = azureKeyEl.value.trim();
+  if (!endpoint || !key) return;
+  const file = currentFile();
+  if (!file) {
+    compareSummaryEl.textContent = "Kein Bild geladen.";
+    compareSummaryEl.classList.remove("hidden");
+    return;
+  }
+
+  compareSummaryEl.textContent = "Vergleich läuft…";
+  compareSummaryEl.classList.remove("hidden");
+  compareTextDiffEl.classList.add("hidden");
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("azure_endpoint", endpoint);
+  fd.append("azure_key", key);
+  if (lastResponse?.analyzeResult?.pages?.[0]) {
+    fd.append("expert_enable_layout", "true");
+  }
+
+  try {
+    const resp = await fetch(compareEndpoint, { method: "POST", body: fd });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      compareSummaryEl.textContent = `Fehler: ${err.detail || resp.statusText}`;
+      return;
+    }
+    const data = await resp.json();
+    const diff = data.diff || {};
+    const onlyOurs = diff.only_ours || [];
+    const onlyAzure = diff.only_azure || [];
+    const matched = diff.matched_count || 0;
+    renderDiffOverlay(onlyOurs, onlyAzure);
+
+    compareSummaryEl.innerHTML =
+      `Übereinstimmungen: <b>${matched}</b> | ` +
+      `Nur wir: <b style="color:#f59e0b">${onlyOurs.length}</b> | ` +
+      `Nur Azure (fehlend): <b style="color:#ef4444">${onlyAzure.length}</b>`;
+    compareSummaryEl.classList.remove("hidden");
+
+    compareOurTextEl.textContent = data.our_text || "";
+    compareAzureTextEl.textContent = data.azure_text || "";
+    compareTextDiffEl.classList.remove("hidden");
+  } catch (err) {
+    compareSummaryEl.textContent = `Netzwerkfehler: ${err.message}`;
+  }
 });
 
 downloadCsvBtn.addEventListener("click", () => {

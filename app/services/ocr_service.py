@@ -21,4 +21,6 @@ class OCRService(Protocol):
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> OCRResult: ...

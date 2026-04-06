@@ -88,6 +88,8 @@ class FakeBackendRouter:
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -102,6 +104,8 @@ class FakeBackendRouter:
             "gif_max_frames": gif_max_frames,
             "expert_enable_layout": expert_enable_layout,
             "expert_layout_model": expert_layout_model,
+            "expert_table_transformer": expert_table_transformer,
+            "expert_word_detector": expert_word_detector,
         }
         result = type(
             "OCRResult",
@@ -183,6 +187,8 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         expert_enable_layout: bool | None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        expert_table_transformer: bool | None = None,
+        expert_word_detector: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -197,6 +203,8 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
             gif_max_frames=gif_max_frames,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
         result.layout = None
         return result, selected_backend
@@ -266,13 +274,13 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                     "content": "page",
                     "span": {"offset": 0, "length": 4},
                     "confidence": 0.87,
-                    "polygon": [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+                    "polygon": [10.0, 10.0, 29.0, 11.0, 31.0, 49.0, 12.0, 48.0],
                 },
                 {
                     "content": "two",
                     "span": {"offset": 5, "length": 3},
                     "confidence": 0.87,
-                    "polygon": [35.0, 10.0, 50.0, 10.0, 50.0, 50.0, 35.0, 50.0],
+                    "polygon": [33.75, 11.25, 48.0, 12.0, 50.0, 50.0, 35.75, 49.25],
                 },
             ],
             "lines": [

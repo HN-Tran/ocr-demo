@@ -16,6 +16,17 @@ from app.services.backend_router import OCRBackendRouter
 from app.services.document_pipeline import DocumentPipeline
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
+from app.services.word_detector import WordDetector, create_word_detector
+
+logger = logging.getLogger("ocr-demo")
+
+
+def _try_create_word_detector(name: str) -> WordDetector | None:
+    try:
+        return create_word_detector(name)
+    except ImportError:
+        logger.warning("Wort-Detektor %r nicht verfügbar (Paket nicht installiert).", name)
+        return None
 
 
 def _normalize_base_path(value: str) -> str:
@@ -60,6 +71,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         enable_layout=settings.ocr_expert_enable_layout,
         layout_model=settings.ocr_expert_layout_model,
         timeout_s=settings.request_timeout_s,
+        enable_table_transformer=settings.ocr_expert_table_transformer,
+        word_detector=_try_create_word_detector(settings.ocr_word_detector),
     )
     ocr_backend_router = OCRBackendRouter(
         default_backend=settings.ocr_backend,
@@ -105,6 +118,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_backend": settings.ocr_backend,
                 "default_expert_enable_layout": settings.ocr_expert_enable_layout,
                 "default_expert_layout_model": settings.ocr_expert_layout_model,
+                "default_expert_table_transformer": settings.ocr_expert_table_transformer,
+                "default_expert_word_detector": settings.ocr_word_detector,
                 "static_version": version,
                 "app_base_path": app_base_path,
             },

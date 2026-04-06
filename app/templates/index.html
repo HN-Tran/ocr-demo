@@ -184,6 +184,35 @@
             </label>
 
             <label>
+              Dev: Table Transformer
+              <select id="expert_table_transformer" name="expert_table_transformer">
+                <option value="" selected>
+                  Standard ({{ "An" if default_expert_table_transformer else "Aus" }})
+                </option>
+                <option value="true">An</option>
+                <option value="false">Aus</option>
+              </select>
+              <span class="hint">
+                Verwendet Microsoft Table Transformer für präzise Zell-Bounding-Boxes bei erkannten Tabellen (nur Dev-Modus).
+              </span>
+            </label>
+
+            <label>
+              Dev: Wort-Erkennung
+              <select id="expert_word_detector" name="expert_word_detector">
+                <option value="" selected>
+                  Standard ({{ default_expert_word_detector or "Aus" }})
+                </option>
+                <option value="none">Aus</option>
+                <option value="paddleocr">PaddleOCR</option>
+                <option value="doctr">DocTR</option>
+              </select>
+              <span class="hint">
+                Optionaler Wort-Detektor für präzise Wort-Bounding-Boxes (PaddleOCR oder DocTR, nur Dev-Modus).
+              </span>
+            </label>
+
+            <label>
               Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>
@@ -281,6 +310,7 @@
           <div class="layout-head">
             <h3>Layout</h3>
             <p id="layout-summary"></p>
+            <button id="word-toggle-btn" class="layout-toggle-btn" type="button" aria-pressed="false">Wörter</button>
           </div>
           <div id="layout-visualizations" class="layout-visualizations hidden"></div>
           <div id="layout-pages"></div>
@@ -300,6 +330,25 @@
         <section id="structured-wrap" class="hidden">
           <h3>Strukturierte Nutzdaten</h3>
           <pre id="json-output"></pre>
+        </section>
+        <section id="compare-section" class="hidden">
+          <h3>Vergleich mit Azure-Endpunkt</h3>
+          <form class="compare-form" id="compare-form">
+            <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
+            <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
+            <button type="submit" class="action-btn">Vergleichen</button>
+          </form>
+          <p id="compare-summary" class="compare-diff-summary hidden"></p>
+          <div id="compare-text-diff" class="compare-text-diff hidden">
+            <div class="compare-text-panel">
+              <h4>Unser OCR</h4>
+              <pre id="compare-our-text"></pre>
+            </div>
+            <div class="compare-text-panel">
+              <h4>Azure OCR</h4>
+              <pre id="compare-azure-text"></pre>
+            </div>
+          </div>
         </section>
         <div id="loading-overlay" class="loading-overlay" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>

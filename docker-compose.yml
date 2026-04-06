@@ -15,6 +15,9 @@ services:
       DEFAULT_TOKEN_LIMIT: ${DEFAULT_TOKEN_LIMIT:-16384}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-8388608}
       MAX_IMAGE_DIM: ${MAX_IMAGE_DIM:-2048}
+      OCR_WORD_DETECTOR: ${OCR_WORD_DETECTOR:-doctr}
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      FLAGS_use_mkldnn: "0"
     depends_on:
       ollama:
         condition: service_started

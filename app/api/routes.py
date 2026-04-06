@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -265,6 +266,90 @@ def _slice_line_rect(
     return x1, line_y1, x2, line_y2
 
 
+def _polygon_to_quad(
+    polygon: list[float],
+) -> tuple[
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+] | None:
+    """Parse a flat polygon into (TL, TR, BR, BL) corners.
+
+    Uses diagonal sums/differences to sort points regardless of winding order,
+    so tilted/skewed region polygons from the layout model are handled correctly.
+    """
+    if len(polygon) < 8:
+        return None
+    pts = [(polygon[i], polygon[i + 1]) for i in range(0, min(len(polygon), 8), 2)]
+    if len(pts) < 4:
+        return None
+    tl = min(pts, key=lambda p: p[0] + p[1])
+    br = max(pts, key=lambda p: p[0] + p[1])
+    tr = max(pts, key=lambda p: p[0] - p[1])
+    bl = min(pts, key=lambda p: p[0] - p[1])
+    return tl, tr, br, bl
+
+
+def _bilinear(
+    tl: tuple[float, float],
+    tr: tuple[float, float],
+    bl: tuple[float, float],
+    br: tuple[float, float],
+    u: float,
+    v: float,
+) -> tuple[float, float]:
+    """Bilinear interpolation within a quad.  u=0→left, u=1→right; v=0→top, v=1→bottom."""
+    x = (1 - u) * (1 - v) * tl[0] + u * (1 - v) * tr[0] + (1 - u) * v * bl[0] + u * v * br[0]
+    y = (1 - u) * (1 - v) * tl[1] + u * (1 - v) * tr[1] + (1 - u) * v * bl[1] + u * v * br[1]
+    return x, y
+
+
+def _word_polygon_in_quad(
+    tl: tuple[float, float],
+    tr: tuple[float, float],
+    br: tuple[float, float],
+    bl: tuple[float, float],
+    u0: float,
+    u1: float,
+    v0: float,
+    v1: float,
+) -> list[float]:
+    """Return a flat 8-float polygon for a word cell within a quad.
+
+    Takes clockwise corners (tl, tr, br, bl) matching _polygon_to_quad output.
+    (u0,u1) is the horizontal character range; (v0,v1) is the vertical line range.
+    The result is a proper quadrilateral that follows the region's tilt/skew.
+    """
+    p_tl = _bilinear(tl, tr, bl, br, u0, v0)
+    p_tr = _bilinear(tl, tr, bl, br, u1, v0)
+    p_br = _bilinear(tl, tr, bl, br, u1, v1)
+    p_bl = _bilinear(tl, tr, bl, br, u0, v1)
+    return [p_tl[0], p_tl[1], p_tr[0], p_tr[1], p_br[0], p_br[1], p_bl[0], p_bl[1]]
+
+
+def _word_wrap_to_lines(text: str, chars_per_line: int) -> list[str]:
+    """Word-wrap text to approximately chars_per_line chars; returns original if already 1 line."""
+    words = text.split()
+    if not words:
+        return [text] if text.strip() else []
+    lines: list[str] = []
+    current: list[str] = []
+    length = 0
+    for word in words:
+        extra = 1 if current else 0
+        if length + extra + len(word) > chars_per_line and current:
+            lines.append(" ".join(current))
+            current = [word]
+            length = len(word)
+        else:
+            length += extra + len(word)
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return lines or [text]
+
+
 def _split_page_paragraphs(page_text: str) -> list[str]:
     normalized = page_text.strip()
     if not normalized:
@@ -382,22 +467,30 @@ def _build_line_and_word_entries(
             segments = [line.strip() for line in region_content.splitlines() if line.strip()] or [
                 region_content
             ]
+            # If content is a single paragraph, word-wrap using region width to estimate
+            # chars per line — prevents all words from spanning the full region height.
+            quad = _polygon_to_quad(region_polygon) if region_polygon else None
+            if len(segments) == 1:
+                ref_width = (
+                    (quad[1][0] - quad[0][0]) ** 2 + (quad[1][1] - quad[0][1]) ** 2
+                ) ** 0.5 if quad else (region_rect[2] - region_rect[0] if region_rect else 0.0)
+                chars_per_line = max(15, int(ref_width * 72 / 1000))
+                wrapped = _word_wrap_to_lines(segments[0], chars_per_line)
+                if len(wrapped) > 1:
+                    segments = wrapped
+            n_lines = len(segments)
             for line_index, segment in enumerate(segments):
-                line_rect = _slice_line_rect(
-                    region_rect, line_index=line_index, line_count=len(segments)
-                )
-                if region_polygon is not None and len(segments) == 1:
-                    polygon = region_polygon
+                v0 = line_index / n_lines
+                v1 = (line_index + 1) / n_lines
+                # Line polygon: full horizontal extent of this line strip
+                if quad:
+                    line_poly: list[float] = _word_polygon_in_quad(*quad, 0.0, 1.0, v0, v1)
                 else:
-                    polygon = (
+                    line_rect = _slice_line_rect(region_rect, line_index=line_index, line_count=n_lines)
+                    line_poly = (
                         _empty_polygon()
                         if line_rect is None
-                        else _rect_to_polygon(
-                            x1=line_rect[0],
-                            y1=line_rect[1],
-                            x2=line_rect[2],
-                            y2=line_rect[3],
-                        )
+                        else _rect_to_polygon(x1=line_rect[0], y1=line_rect[1], x2=line_rect[2], y2=line_rect[3])
                     )
                 line_span, search_cursor = _locate_span_in_page_content(
                     page_content=page_content,
@@ -410,11 +503,28 @@ def _build_line_and_word_entries(
                     "content": segment,
                     "spans": [line_span],
                     "confidence": region_confidence,
-                    "polygon": polygon,
+                    "polygon": line_poly,
                 }
                 lines.append(line_entry)
+                segment_length = max(len(segment), 1)
                 for word_match in _WORD_RE.finditer(segment):
                     word_content = word_match.group(0)
+                    u0 = word_match.start() / segment_length
+                    u1 = word_match.end() / segment_length
+                    if quad:
+                        word_poly: list[float] = _word_polygon_in_quad(*quad, u0, u1, v0, v1)
+                    elif line_poly != _empty_polygon():
+                        # Slice the already-computed line rect horizontally
+                        lx1, ly1, lx2, _lp2, _lp3, _lp4, _lp5, ly2 = line_poly
+                        lw = max(lx2 - lx1, 0.0)
+                        word_poly = _rect_to_polygon(
+                            x1=lx1 + lw * u0,
+                            y1=ly1,
+                            x2=lx1 + lw * u1,
+                            y2=ly2,
+                        )
+                    else:
+                        word_poly = _empty_polygon()
                     word_entry: dict[str, object] = {
                         "content": word_content,
                         "span": _make_span(
@@ -424,20 +534,8 @@ def _build_line_and_word_entries(
                             string_index_type=string_index_type,
                         ),
                         "confidence": region_confidence,
-                        "polygon": _empty_polygon(),
+                        "polygon": word_poly,
                     }
-                    if line_rect is not None:
-                        x1, y1, x2, y2 = line_rect
-                        line_width = max(x2 - x1, 0.0)
-                        segment_length = max(len(segment), 1)
-                        word_x1 = x1 + (line_width * word_match.start() / segment_length)
-                        word_x2 = x1 + (line_width * word_match.end() / segment_length)
-                        word_entry["polygon"] = _rect_to_polygon(
-                            x1=word_x1,
-                            y1=y1,
-                            x2=word_x2,
-                            y2=y2,
-                        )
                     words.append(word_entry)
         return lines, words
 
@@ -991,6 +1089,8 @@ async def _run_plain_ocr(
     expert_enable_layout: bool | None = None,
     expert_layout_model: str | None = None,
     expert_layout_threshold: float | None = None,
+    expert_table_transformer: bool | None = None,
+    expert_word_detector: str | None = None,
 ) -> tuple[object, str]:
     try:
         return await pipeline.run(
@@ -1007,6 +1107,8 @@ async def _run_plain_ocr(
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1032,6 +1134,8 @@ async def _execute_compat_analyze_operation(
     expert_enable_layout: bool | None,
     expert_layout_model: str | None = None,
     expert_layout_threshold: float | None = None,
+    expert_table_transformer: bool | None = None,
+    expert_word_detector: str | None = None,
 ) -> None:
     try:
         await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
@@ -1043,6 +1147,8 @@ async def _execute_compat_analyze_operation(
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
         completed_at = datetime.now(timezone.utc)
         payload = _build_compat_response_payload(
@@ -1177,6 +1283,8 @@ async def ocr(
     expert_enable_layout: bool | None = Form(None),
     expert_layout_model: str | None = Form(None),
     expert_layout_threshold: float | None = Form(None),
+    expert_table_transformer: bool | None = Form(None),
+    expert_word_detector: str | None = Form(None),
     backend: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
@@ -1206,6 +1314,14 @@ async def ocr(
         expert_layout_threshold,
         _query_param(request, "expert_layout_threshold"),
         "expert_layout_threshold",
+    )
+    expert_table_transformer = _resolve_bool_param(
+        expert_table_transformer,
+        _query_param(request, "expert_table_transformer"),
+        "expert_table_transformer",
+    )
+    expert_word_detector = _resolve_text_param(
+        expert_word_detector, _query_param(request, "expert_word_detector"), None
     )
     backend = _resolve_text_param(backend, _query_param(request, "backend"), None)
 
@@ -1244,6 +1360,8 @@ async def ocr(
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1289,6 +1407,208 @@ async def ocr(
     }
 
 
+# ---------------------------------------------------------------------------
+# Azure endpoint comparison helpers
+# ---------------------------------------------------------------------------
+
+
+def _polygon_to_bbox(polygon: list[float]) -> tuple[float, float, float, float]:
+    xs = polygon[0::2]
+    ys = polygon[1::2]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _iou_bbox(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _normalize_azure_words(pages: list[object]) -> list[dict[str, object]]:
+    """Normalize Azure word polygon coords from pixels to 0-1000 scale."""
+    if not pages:
+        return []
+    page = pages[0]
+    if not isinstance(page, dict):
+        return []
+    pw = float(page.get("width") or 1000)
+    ph = float(page.get("height") or 1000)
+    result: list[dict[str, object]] = []
+    for word in page.get("words") or []:
+        if not isinstance(word, dict):
+            continue
+        polygon = word.get("polygon", [])
+        if isinstance(polygon, list) and len(polygon) >= 8:
+            norm: list[float] = [
+                float(v) / (pw if i % 2 == 0 else ph) * 1000
+                for i, v in enumerate(polygon)
+            ]
+        else:
+            norm = []
+        result.append({
+            "content": word.get("content", ""),
+            "polygon": norm,
+            "confidence": word.get("confidence", 0.0),
+        })
+    return result
+
+
+def _diff_word_polygons(
+    ours: list[dict[str, object]],
+    azure: list[dict[str, object]],
+    threshold: float = 0.3,
+) -> dict[str, object]:
+    our_bboxes = [_polygon_to_bbox(w["polygon"]) for w in ours if len(w.get("polygon", [])) >= 8]  # type: ignore[arg-type]
+    az_bboxes = [_polygon_to_bbox(w["polygon"]) for w in azure if len(w.get("polygon", [])) >= 8]  # type: ignore[arg-type]
+
+    our_matched: set[int] = set()
+    az_matched: set[int] = set()
+
+    for ai, ab in enumerate(az_bboxes):
+        best_iou, best_oi = 0.0, -1
+        for oi, ob in enumerate(our_bboxes):
+            if oi in our_matched:
+                continue
+            iou = _iou_bbox(ab, ob)
+            if iou > best_iou:
+                best_iou, best_oi = iou, oi
+        if best_iou >= threshold and best_oi >= 0:
+            az_matched.add(ai)
+            our_matched.add(best_oi)
+
+    return {
+        "only_ours": [ours[i] for i in range(len(ours)) if i not in our_matched],
+        "only_azure": [azure[i] for i in range(len(azure)) if i not in az_matched],
+        "matched_count": len(our_matched),
+    }
+
+
+async def _call_azure_read(
+    endpoint: str,
+    key: str,
+    image_bytes: bytes,
+    content_type: str,
+    timeout_s: float = 60.0,
+) -> dict[str, object]:
+    """Call Azure prebuilt-read endpoint and return the analyzeResult dict."""
+    url = f"{endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
+    headers = {
+        "Ocp-Apim-Subscription-Key": key,
+        "Content-Type": content_type or "application/octet-stream",
+    }
+    params = {"api-version": "2023-07-31"}
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        resp = await client.post(url, content=image_bytes, headers=headers, params=params)
+        resp.raise_for_status()
+        if resp.status_code == 200:
+            result: dict[str, object] = resp.json()
+            return result
+        # 202 async — poll Operation-Location
+        op_url = resp.headers.get("Operation-Location", "")
+        if not op_url:
+            raise ValueError("Azure returned 202 ohne Operation-Location-Header")
+        poll_headers = {"Ocp-Apim-Subscription-Key": key}
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1.5)
+            poll = await client.get(op_url, headers=poll_headers)
+            poll.raise_for_status()
+            data: dict[str, object] = poll.json()
+            st = str(data.get("status", ""))
+            if st == "succeeded":
+                return data
+            if st in ("failed", "canceled"):
+                err = data.get("error", st)
+                raise ValueError(f"Azure OCR fehlgeschlagen: {err}")
+        raise TimeoutError("Azure OCR Timeout")
+
+
+@router.post("/compare")
+async def compare_with_azure(
+    request: Request,
+    file: UploadFile | None = File(None),
+    azure_endpoint: str = Form(...),
+    azure_key: str = Form(...),
+    backend: str | None = Form(None),
+    expert_enable_layout: bool | None = Form(None),
+    expert_layout_threshold: float | None = Form(None),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
+) -> dict:
+    settings = get_settings()
+    if file is not None:
+        image_bytes = await file.read()
+        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
+    else:
+        image_bytes = await request.body()
+        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+
+    if not image_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")
+    if len(image_bytes) > settings.max_upload_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß.")
+
+    try:
+        our_task = pipeline.run(
+            backend=backend,
+            image_bytes=image_bytes,
+            content_type=content_type,
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task="ocr_text",
+            custom_prompt=None,
+            token_limit=None,
+            gif_max_frames=None,
+            expert_enable_layout=expert_enable_layout,
+            expert_layout_threshold=expert_layout_threshold,
+        )
+        azure_task = _call_azure_read(azure_endpoint, azure_key, image_bytes, content_type)
+        (our_result, _), azure_response = await asyncio.gather(our_task, azure_task)
+    except (ValueError, TimeoutError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Azure-Fehler: {exc}") from exc
+
+    our_analyze = _build_analyze_result(
+        content=our_result.text,
+        model_id=our_result.model,
+        layout=our_result.layout,
+        page_infos=getattr(our_result, "page_infos", None),
+        page_texts=getattr(our_result, "page_texts", None),
+    )
+    our_pages = our_analyze.get("pages")
+    our_words: list[dict[str, object]] = []
+    if isinstance(our_pages, list) and our_pages:
+        first = our_pages[0]
+        if isinstance(first, dict):
+            w = first.get("words")
+            if isinstance(w, list):
+                our_words = cast(list[dict[str, object]], w)
+
+    raw_azure = azure_response.get("analyzeResult")
+    azure_analyze: dict[str, object] = raw_azure if isinstance(raw_azure, dict) else azure_response
+    raw_pages = azure_analyze.get("pages")
+    azure_pages: list[object] = raw_pages if isinstance(raw_pages, list) else []
+    azure_words_normalized = _normalize_azure_words(azure_pages)
+    raw_content = azure_analyze.get("content")
+    azure_text = str(raw_content) if raw_content is not None else ""
+
+    diff = _diff_word_polygons(our_words, azure_words_normalized)
+
+    return {
+        "our_text": our_result.text,
+        "azure_text": azure_text,
+        "our_words": our_words,
+        "azure_words": azure_words_normalized,
+        "diff": diff,
+        "our_warnings": our_result.warnings,
+    }
+
+
 @compat_router.get("/ready")
 @compat_router.get("/ContainerReadiness")
 @compat_router.get("/ContainerLiveness")
@@ -1323,6 +1643,8 @@ async def compat_sync_analyze(
     expert_enable_layout: bool | None = Query(None),
     expert_layout_model: str | None = Query(None),
     expert_layout_threshold: float | None = Query(None),
+    expert_table_transformer: bool | None = Query(None),
+    expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
     del locale
@@ -1341,6 +1663,8 @@ async def compat_sync_analyze(
         expert_enable_layout=expert_enable_layout,
         expert_layout_model=expert_layout_model,
         expert_layout_threshold=expert_layout_threshold,
+        expert_table_transformer=expert_table_transformer,
+        expert_word_detector=expert_word_detector,
     )
     completed_at = datetime.now(timezone.utc)
     return JSONResponse(
@@ -1368,6 +1692,8 @@ async def compat_analyze(
     expert_enable_layout: bool | None = Query(None),
     expert_layout_model: str | None = Query(None),
     expert_layout_threshold: float | None = Query(None),
+    expert_table_transformer: bool | None = Query(None),
+    expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
 ) -> Response:
@@ -1396,6 +1722,8 @@ async def compat_analyze(
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_word_detector=expert_word_detector,
         )
     )
 

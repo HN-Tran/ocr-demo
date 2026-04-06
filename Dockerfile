@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -28,7 +28,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
         --index-url ${PYTORCH_CPU_INDEX_URL} \
         --extra-index-url https://pypi.org/simple \
         torch torchvision && \
-    python -m pip install --no-cache-dir .
+    python -m pip install --no-cache-dir ".[paddle,doctr]"
 
 RUN useradd -r -u 101 -m appuser && \
     mkdir -p /home/appuser/.cache && \
