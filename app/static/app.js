@@ -1875,7 +1875,7 @@ compareFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   const endpoint = azureEndpointEl.value.trim();
   const key = azureKeyEl.value.trim();
-  if (!endpoint || !key) return;
+  if (!endpoint) return;
   const file = currentFile();
   if (!file) {
     compareSummaryEl.textContent = "Kein Bild geladen.";

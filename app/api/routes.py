@@ -1532,7 +1532,7 @@ async def compare_with_azure(
     request: Request,
     file: UploadFile | None = File(None),
     azure_endpoint: str = Form(...),
-    azure_key: str = Form(...),
+    azure_key: str = Form(default=""),
     backend: str | None = Form(None),
     expert_enable_layout: bool | None = Form(None),
     expert_layout_threshold: float | None = Form(None),
