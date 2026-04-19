@@ -140,12 +140,12 @@ def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
         return pdf_path.read_bytes()
 
 
-def _maybe_convert_word(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
+async def _maybe_convert_word(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
     """If content_type is DOC/DOCX, convert to PDF. Otherwise pass through."""
     if content_type not in _WORD_DOCUMENT_TYPES:
         return image_bytes, content_type
     suffix = ".doc" if content_type == "application/msword" else ".docx"
-    pdf_bytes = _convert_word_to_pdf(image_bytes, suffix=suffix)
+    pdf_bytes = await asyncio.to_thread(_convert_word_to_pdf, image_bytes, suffix)
     return pdf_bytes, "application/pdf"
 
 
@@ -1117,7 +1117,7 @@ async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
-    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(
@@ -1385,7 +1385,7 @@ async def ocr(
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
-    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(
@@ -1537,6 +1537,8 @@ def _diff_word_polygons(
     return {
         "only_ours": [ours[i] for i in range(len(ours)) if i not in our_matched],
         "only_azure": [azure[i] for i in range(len(azure)) if i not in az_matched],
+        "matched_ours": [ours[i] for i in sorted(our_matched)],
+        "matched_azure": [azure[i] for i in sorted(az_matched)],
         "matched_count": len(our_matched),
     }
 
@@ -1600,7 +1602,7 @@ async def compare_with_azure(
     else:
         image_bytes = await request.body()
         content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
-    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")

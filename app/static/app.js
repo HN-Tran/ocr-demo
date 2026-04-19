@@ -332,26 +332,14 @@ function updatePreview() {
   }
 
   if (file.type === "application/pdf") {
-    const pdfUrl = previewUrl;
-    previewPdfEl.classList.remove("hidden");
-    window.requestAnimationFrame(() => {
-      if (previewUrl === pdfUrl) {
-        previewPdfEl.data = pdfUrl;
-      }
-    });
-    previewPdfLinkEl.href = previewUrl;
-    previewPdfLinkEl.textContent = "PDF in neuem Tab öffnen";
-    previewPdfLinkEl.classList.remove("hidden");
+    previewEmptyEl.textContent = "PDF-Vorschau wird nach OCR angezeigt.";
+    previewEmptyEl.classList.remove("hidden");
     return;
   }
 
   if (isTiffLikeFile(file)) {
-    previewEmptyEl.textContent =
-      "TIFF-Vorschau wird vom Browser nicht zuverlässig unterstützt. OCR läuft trotzdem.";
+    previewEmptyEl.textContent = "TIFF-Vorschau wird nach OCR angezeigt.";
     previewEmptyEl.classList.remove("hidden");
-    previewPdfLinkEl.href = previewUrl;
-    previewPdfLinkEl.textContent = "Datei in neuem Tab öffnen";
-    previewPdfLinkEl.classList.remove("hidden");
     return;
   }
 
@@ -870,11 +858,28 @@ function applyWordMode(active, layoutPages) {
   }
 }
 
-function renderDiffOverlay(onlyOurs, onlyAzure) {
-  // Remove any existing diff SVG layer
-  const existing = previewLayoutOverlayEl.querySelector(".preview-diff-svg");
-  if (existing) existing.remove();
-  if (!onlyOurs && !onlyAzure) return;
+function renderDiffOverlay(diff) {
+  // Remove existing diff layer and normal layout overlay
+  const existingDiff = previewLayoutOverlayEl.querySelector(".preview-diff-svg");
+  if (existingDiff) existingDiff.remove();
+
+  if (!diff) {
+    // Restore normal layout overlay
+    previewLayoutOverlayEl.querySelectorAll(".preview-layout-svg, .preview-layout-box").forEach(
+      (el) => el.classList.remove("hidden")
+    );
+    return;
+  }
+
+  // Hide normal layout overlay
+  previewLayoutOverlayEl.querySelectorAll(".preview-layout-svg:not(.preview-diff-svg), .preview-layout-box").forEach(
+    (el) => el.classList.add("hidden")
+  );
+
+  const onlyOurs = diff.only_ours || [];
+  const onlyAzure = diff.only_azure || [];
+  const matchedOurs = diff.matched_ours || [];
+  const matchedAzure = diff.matched_azure || [];
 
   const svgNs = "http://www.w3.org/2000/svg";
   const svgEl = document.createElementNS(svgNs, "svg");
@@ -882,26 +887,26 @@ function renderDiffOverlay(onlyOurs, onlyAzure) {
   svgEl.setAttribute("preserveAspectRatio", "none");
   svgEl.classList.add("preview-layout-svg", "preview-diff-svg");
   previewLayoutOverlayEl.appendChild(svgEl);
+  previewLayoutOverlayEl.classList.remove("hidden");
 
-  (onlyOurs || []).forEach((w) => {
-    const points = normalizedPolygonToPercentages(w.polygon);
-    if (!points) return;
-    const el = document.createElementNS(svgNs, "polygon");
-    el.classList.add("preview-diff-shape-ours");
-    el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
-    el.title = `Nur wir: ${w.content || ""}`;
-    svgEl.appendChild(el);
-  });
+  function addShapes(words, cssClass, labelPrefix) {
+    (words || []).forEach((w) => {
+      const points = normalizedPolygonToPercentages(w.polygon);
+      if (!points) return;
+      const el = document.createElementNS(svgNs, "polygon");
+      el.classList.add(cssClass);
+      el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
+      const titleEl = document.createElementNS(svgNs, "title");
+      titleEl.textContent = `${labelPrefix}: ${w.content || ""}`;
+      el.appendChild(titleEl);
+      svgEl.appendChild(el);
+    });
+  }
 
-  (onlyAzure || []).forEach((w) => {
-    const points = normalizedPolygonToPercentages(w.polygon);
-    if (!points) return;
-    const el = document.createElementNS(svgNs, "polygon");
-    el.classList.add("preview-diff-shape-missing");
-    el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
-    el.title = `Nur Azure: ${w.content || ""}`;
-    svgEl.appendChild(el);
-  });
+  addShapes(matchedOurs, "preview-diff-shape-matched", "Übereinstimmung");
+  addShapes(matchedAzure, "preview-diff-shape-matched-azure", "Übereinstimmung (Azure)");
+  addShapes(onlyOurs, "preview-diff-shape-ours", "Nur wir");
+  addShapes(onlyAzure, "preview-diff-shape-missing", "Nur Azure");
 }
 
 function renderLayoutVisualizations(visualizations) {
@@ -1681,7 +1686,7 @@ async function runOCR() {
 
       // Reset word toggle and diff overlay on new result
       wordToggleBtnEl.setAttribute("aria-pressed", "false");
-      renderDiffOverlay([], []);
+      renderDiffOverlay(null);
       compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
       compareSummaryEl.classList.add("hidden");
       compareTextDiffEl.classList.add("hidden");
@@ -1970,12 +1975,12 @@ compareFormEl.addEventListener("submit", async (event) => {
     const onlyOurs = diff.only_ours || [];
     const onlyAzure = diff.only_azure || [];
     const matched = diff.matched_count || 0;
-    renderDiffOverlay(onlyOurs, onlyAzure);
+    renderDiffOverlay(diff);
 
     compareSummaryEl.innerHTML =
-      `Übereinstimmungen: <b>${matched}</b> | ` +
-      `Nur wir: <b style="color:#f59e0b">${onlyOurs.length}</b> | ` +
-      `Nur Azure (fehlend): <b style="color:#ef4444">${onlyAzure.length}</b>`;
+      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matched}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOurs.length}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-missing">Nur Azure: <b>${onlyAzure.length}</b></span>`;
     compareSummaryEl.classList.remove("hidden");
 
     compareOurTextEl.textContent = data.our_text || "";

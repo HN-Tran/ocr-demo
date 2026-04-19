@@ -576,9 +576,10 @@ class OCRPipeline:
     ) -> tuple[list[bytes], list[str], list[dict[str, object]], list[bytes] | None]:
         """Return (prepared_images, warnings, page_infos, raw_page_images).
 
-        ``raw_page_images`` is set only for PDFs (the rendered page PNGs before
-        preprocessing) and ``None`` otherwise.
+        ``raw_page_images`` is set for PDFs and TIFFs — file types the browser
+        cannot preview natively — and ``None`` otherwise.
         """
+        _tiff_types = {"image/tif", "image/tiff", "image/x-tiff"}
         warnings: list[str] = []
         raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
@@ -606,6 +607,11 @@ class OCRPipeline:
             warnings.extend(
                 self._with_page_prefix(warning, idx, total_pages) for warning in preprocess_warnings
             )
+
+        # Generate preview images for formats the browser cannot display.
+        if raw_page_images is None and content_type in _tiff_types:
+            raw_page_images = list(prepared_images)
+
         return prepared_images, warnings, page_infos, raw_page_images
 
     async def _run_plain_on_image(

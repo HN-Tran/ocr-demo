@@ -1068,16 +1068,23 @@ pre {
 }
 
 /* Diff overlay shapes */
-.preview-diff-shape-ours {
-  fill: color-mix(in srgb, #f59e0b 12%, transparent);
-  stroke: #f59e0b;
+.preview-diff-shape-matched {
+  fill: color-mix(in srgb, #22c55e 10%, transparent);
+  stroke: #22c55e;
   stroke-width: 0.2;
   vector-effect: non-scaling-stroke;
 }
-.preview-diff-shape-azure {
-  fill: color-mix(in srgb, #3b82f6 12%, transparent);
-  stroke: #3b82f6;
-  stroke-width: 0.2;
+.preview-diff-shape-matched-azure {
+  fill: none;
+  stroke: #22c55e;
+  stroke-width: 0.15;
+  stroke-dasharray: 0.5 0.3;
+  vector-effect: non-scaling-stroke;
+}
+.preview-diff-shape-ours {
+  fill: color-mix(in srgb, #f59e0b 15%, transparent);
+  stroke: #f59e0b;
+  stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
 }
 .preview-diff-shape-missing {
@@ -1086,6 +1093,11 @@ pre {
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
 }
+
+.diff-legend-item { font-weight: 500; }
+.diff-legend-matched b { color: #22c55e; }
+.diff-legend-ours b { color: #f59e0b; }
+.diff-legend-missing b { color: #ef4444; }
 
 /* Compare section */
 #compare-section {
