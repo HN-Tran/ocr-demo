@@ -42,7 +42,7 @@
             id="file"
             name="file"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,image/tiff,.gif,.tif,.tiff,application/pdf"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/tiff,.gif,.tif,.tiff,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             required
             class="hidden"
           />
@@ -50,13 +50,13 @@
           <section id="onboarding-card" class="onboarding-card">
             <div class="onboarding-hero">
               <button id="dropzone" class="dropzone" type="button">
-                Bilder oder PDFs hier ablegen
+                Bilder, PDFs oder Word-Dokumente hier ablegen
               </button>
             </div>
             <div class="onboarding-actions">
               <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
               <p class="onboarding-hint">
-                Unterstützt PNG, JPEG, WEBP, GIF, TIFF und mehrseitige PDFs.
+                Unterstützt PNG, JPEG, WEBP, GIF, TIFF, mehrseitige PDFs, DOC und DOCX.
               </p>
             </div>
           </section>
@@ -70,6 +70,10 @@
                 </p>
               </div>
               <button id="change-file-btn" class="change-file-btn" type="button">Datei ändern</button>
+            </div>
+            <div id="page-selector-wrap" class="page-selector-wrap hidden">
+              <label for="page-selector">Seite:</label>
+              <select id="page-selector"></select>
             </div>
             <div id="preview-empty" class="preview-empty">Keine Datei ausgewählt.</div>
             <div id="preview-image-stage" class="preview-media preview-image-stage hidden">

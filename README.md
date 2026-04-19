@@ -78,7 +78,7 @@ Kompatibilitäts-Hinweise:
 
 Multipart-Felder:
 
-- `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`)
+- `file`: Bild, PDF oder Word-Dokument (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
 - `mode`: `plain` oder `structured`
 - `schema_name`: erforderlich bei `mode=structured`
 - `backend`: optional `direct` oder `expert` (UI: Direct/Dev, Standard aus `OCR_BACKEND`)
@@ -95,8 +95,8 @@ Raw-Upload (`application/octet-stream`):
 - `mode`, `schema_name`, `backend`, `model`, `token_limit`, `gif_max_frames`,
   `expert_enable_layout`, `task` und `custom_prompt` können als Query-Parameter
   übergeben werden.
-- Der Server erkennt `png`, `jpeg`, `webp`, `gif`, `tiff` und `pdf` anhand der
-  Dateisignatur automatisch.
+- Der Server erkennt `png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc` und `docx` anhand der
+  Dateisignatur automatisch. Word-Dokumente werden intern via LibreOffice in PDF konvertiert.
 
 PowerShell-Beispiel:
 

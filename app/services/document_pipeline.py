@@ -24,6 +24,7 @@ from app.services.ocr_pipeline import (
     PLAIN_TASK_OCR_TEXT,
     OCRPipeline,
     OCRResult,
+    encode_page_images,
     normalize_ocr_text_output,
 )
 from app.services.ollama_client import OllamaClient, OllamaError
@@ -226,7 +227,7 @@ def _match_to_source_text(
             best_start = i
 
     if best_start_score < threshold:
-        return candidate
+        return ""
 
     # Sequential alignment: advance through source text one candidate line at a time.
     # For each candidate line, try joining 1..max_join consecutive source text lines
@@ -779,9 +780,11 @@ class DocumentPipeline:
 
         # Prepare pages (PDF or single image)
         pages: list[tuple[Image.Image, bytes]] = []
+        raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
             rendered_pages, pdf_warnings = self.direct_pipeline._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
+            raw_page_images = list(rendered_pages)
             for page_bytes in rendered_pages:
                 pages.append((Image.open(io.BytesIO(page_bytes)).convert("RGB"), page_bytes))
         else:
@@ -861,6 +864,7 @@ class DocumentPipeline:
             page_infos=page_infos,
             page_texts=all_page_texts,
             markdown=text,
+            page_images=encode_page_images(raw_page_images) if raw_page_images else None,
         )
 
     async def _fallback(

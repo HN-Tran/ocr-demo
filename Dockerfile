@@ -13,7 +13,8 @@ RUN apt-get update && \
         git \
         libgl1 \
         libglib2.0-0 \
-        libgomp1 && \
+        libgomp1 \
+        libreoffice-writer && \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

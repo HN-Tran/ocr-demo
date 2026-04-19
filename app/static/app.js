@@ -50,6 +50,8 @@ const compareSectionEl = document.getElementById("compare-section");
 const compareFormEl = document.getElementById("compare-form");
 const azureEndpointEl = document.getElementById("azure-endpoint");
 const azureKeyEl = document.getElementById("azure-key");
+const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
+const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
 const compareTextDiffEl = document.getElementById("compare-text-diff");
 const compareOurTextEl = document.getElementById("compare-our-text");
@@ -65,6 +67,8 @@ let activeRequestController = null;
 let globalDragDepth = 0;
 let hasPendingAdvancedChanges = false;
 let activeResultView = "layout";
+let pageImageDataUrls = [];
+let currentPageIndex = 0;
 const THEME_KEY = "ocr-demo-theme";
 const MAX_TOKEN_LIMIT = 128000;
 const MAX_GIF_FRAMES = 32;
@@ -75,6 +79,10 @@ const INLINE_PREVIEWABLE_IMAGE_TYPES = new Set([
   "image/gif",
 ]);
 const TIFF_IMAGE_TYPES = new Set(["image/tif", "image/tiff", "image/x-tiff"]);
+const WORD_DOCUMENT_TYPES = new Set([
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
 const LAYOUT_REGION_KIND_ALIASES = new Map([
   ["text", "text"],
   ["text_block", "text"],
@@ -247,6 +255,9 @@ function clearPreview(message = "Keine Datei ausgewählt.") {
     URL.revokeObjectURL(previewUrl);
     previewUrl = null;
   }
+  pageImageDataUrls = [];
+  currentPageIndex = 0;
+  pageSelectorWrapEl.classList.add("hidden");
   previewEmptyEl.textContent = message;
   previewEmptyEl.classList.remove("hidden");
   previewImageStageEl.classList.add("hidden");
@@ -344,11 +355,42 @@ function updatePreview() {
     return;
   }
 
+  if (WORD_DOCUMENT_TYPES.has(file.type) || fileExtension(file.name) === ".doc" || fileExtension(file.name) === ".docx") {
+    previewEmptyEl.textContent = "Word-Vorschau wird nach OCR angezeigt.";
+    previewEmptyEl.classList.remove("hidden");
+    return;
+  }
+
   clearPreview(`Für "${file.type || "unbekannt"}" ist keine Vorschau verfügbar.`);
 }
 
 function currentFile() {
   return fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+}
+
+function populatePageSelector(pageCount) {
+  pageSelectorEl.innerHTML = "";
+  for (let i = 0; i < pageCount; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `Seite ${i + 1}`;
+    pageSelectorEl.appendChild(opt);
+  }
+  pageSelectorWrapEl.classList.toggle("hidden", pageCount <= 1);
+  currentPageIndex = 0;
+  pageSelectorEl.value = "0";
+}
+
+function showPageImage(index) {
+  if (index < 0 || index >= pageImageDataUrls.length) return;
+  currentPageIndex = index;
+  previewImageEl.src = pageImageDataUrls[index];
+  previewImageStageEl.classList.remove("hidden");
+  previewImageEl.classList.remove("hidden");
+  previewPdfEl.classList.add("hidden");
+  previewEmptyEl.classList.add("hidden");
+  const layoutPages = normalizeLayoutPages(lastResponse?.layout);
+  renderLayoutOverlay(layoutPages, index);
 }
 
 function clearLayoutOverlay() {
@@ -575,15 +617,15 @@ function getPolygonBadgeAnchors(points) {
   return { topLeft, topRight };
 }
 
-function renderLayoutOverlay(layoutPages) {
+function renderLayoutOverlay(layoutPages, pageIndex) {
   clearLayoutOverlay();
   const file = currentFile();
-  if (!file || !file.type.startsWith("image/")) {
-    return;
-  }
+  if (!file) return;
+  if (!file.type.startsWith("image/") && pageImageDataUrls.length === 0) return;
 
-  const firstPage = layoutPages[0];
-  if (!firstPage || !Array.isArray(firstPage.regions)) {
+  const selectedIndex = pageIndex != null ? pageIndex : currentPageIndex;
+  const activePage = layoutPages[selectedIndex] || layoutPages[0];
+  if (!activePage || !Array.isArray(activePage.regions)) {
     return;
   }
 
@@ -595,7 +637,7 @@ function renderLayoutOverlay(layoutPages) {
   previewLayoutOverlayEl.appendChild(svgEl);
 
   let overlayCount = 0;
-  firstPage.regions.forEach((region, index) => {
+  activePage.regions.forEach((region, index) => {
     const polygonPoints = normalizedPolygonToPercentages(region.polygon);
     const percentages = polygonPoints
       ? polygonPointsToBounds(polygonPoints)
@@ -801,16 +843,17 @@ function applyWordMode(active, layoutPages) {
     layoutSvgEls.forEach((el) => el.classList.add("hidden"));
     layoutBoxEls.forEach((el) => el.classList.add("hidden"));
 
-    const regions = layoutPages?.[0]?.regions || [];
-    const rawWordPolys = layoutPages?.[0]?.word_polys;
+    const activePage = layoutPages?.[currentPageIndex] || layoutPages?.[0];
+    const regions = activePage?.regions || [];
+    const rawWordPolys = activePage?.word_polys;
     let annotatedWords;
     if (rawWordPolys && rawWordPolys.length > 0) {
-      // Use detector-provided word polygons; no text content available.
       const detectorWords = rawWordPolys.map((wp) => ({ polygon: wp.polygon, content: wp.content || "" }));
       annotatedWords = assignWordsToRegions(detectorWords, regions);
     } else {
-      const words = lastResponse?.analyzeResult?.pages?.[0]?.words || [];
-      annotatedWords = assignWordsToRegions(words, regions);
+      const pages = lastResponse?.analyzeResult?.pages || [];
+      const analyzePageWords = pages?.[currentPageIndex]?.words || pages?.[0]?.words || [];
+      annotatedWords = assignWordsToRegions(analyzePageWords, regions);
     }
     renderWordOverlay(annotatedWords);
     renderWordSidebar(annotatedWords, regions);
@@ -1624,7 +1667,18 @@ async function runOCR() {
       renderTablePreview(tableMatrices);
       const layoutPages = normalizeLayoutPages(data.layout);
       renderLayoutPanel(layoutPages, data.layout_visualizations);
-      renderLayoutOverlay(layoutPages);
+
+      // PDF page images: show rendered pages as preview
+      pageImageDataUrls = data.page_images || [];
+      currentPageIndex = 0;
+      if (pageImageDataUrls.length > 0) {
+        populatePageSelector(pageImageDataUrls.length);
+        showPageImage(0);
+      } else {
+        pageSelectorWrapEl.classList.add("hidden");
+        renderLayoutOverlay(layoutPages, 0);
+      }
+
       // Reset word toggle and diff overlay on new result
       wordToggleBtnEl.setAttribute("aria-pressed", "false");
       renderDiffOverlay([], []);
@@ -1781,7 +1835,7 @@ fileEl.addEventListener("change", () => {
 });
 previewImageEl.addEventListener("load", () => {
   const layoutPages = normalizeLayoutPages(lastResponse?.layout);
-  renderLayoutOverlay(layoutPages);
+  renderLayoutOverlay(layoutPages, currentPageIndex);
 });
 previewImageEl.addEventListener("error", () => {
   const file = currentFile();
@@ -1861,6 +1915,13 @@ downloadBtn.addEventListener("click", () => {
   link.download = "ocr-ergebnis.json";
   link.click();
   URL.revokeObjectURL(url);
+});
+
+// Page selector for PDF previews
+pageSelectorEl.addEventListener("change", () => {
+  const index = parseInt(pageSelectorEl.value, 10);
+  if (isNaN(index)) return;
+  showPageImage(index);
 });
 
 // Word polygon toggle

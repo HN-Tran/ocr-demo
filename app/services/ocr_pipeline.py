@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import time
@@ -130,6 +131,19 @@ class OCRResult:
     page_infos: list[dict[str, object]] | None = None
     page_texts: list[str] | None = None
     markdown: str | None = None
+    page_images: list[str] | None = None
+
+
+def encode_page_images(page_bytes_list: list[bytes], quality: int = 75) -> list[str]:
+    """Convert a list of PNG page bytes to JPEG base64 data URLs for preview."""
+    result: list[str] = []
+    for png_bytes in page_bytes_list:
+        img = Image.open(BytesIO(png_bytes)).convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        result.append(f"data:image/jpeg;base64,{b64}")
+    return result
 
 
 class OCRPipeline:
@@ -559,11 +573,18 @@ class OCRPipeline:
 
     def _prepare_images(
         self, *, image_bytes: bytes, content_type: str | None, gif_max_frames: int
-    ) -> tuple[list[bytes], list[str], list[dict[str, object]]]:
+    ) -> tuple[list[bytes], list[str], list[dict[str, object]], list[bytes] | None]:
+        """Return (prepared_images, warnings, page_infos, raw_page_images).
+
+        ``raw_page_images`` is set only for PDFs (the rendered page PNGs before
+        preprocessing) and ``None`` otherwise.
+        """
         warnings: list[str] = []
+        raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
             source_images, pdf_warnings = self._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
+            raw_page_images = list(source_images)
         elif content_type == "image/gif":
             source_images, gif_warnings = self._render_gif_frames(
                 image_bytes, max_frames=gif_max_frames
@@ -585,7 +606,7 @@ class OCRPipeline:
             warnings.extend(
                 self._with_page_prefix(warning, idx, total_pages) for warning in preprocess_warnings
             )
-        return prepared_images, warnings, page_infos
+        return prepared_images, warnings, page_infos, raw_page_images
 
     async def _run_plain_on_image(
         self,
@@ -773,7 +794,7 @@ class OCRPipeline:
         if selected_gif_max_frames > MAX_GIF_MAX_FRAMES:
             raise ValueError(f"gif_max_frames darf {MAX_GIF_MAX_FRAMES} nicht überschreiten")
 
-        prepared_images, prepare_warnings, page_infos = self._prepare_images(
+        prepared_images, prepare_warnings, page_infos, raw_page_images = self._prepare_images(
             image_bytes=image_bytes,
             content_type=content_type,
             gif_max_frames=selected_gif_max_frames,
@@ -942,4 +963,5 @@ class OCRPipeline:
             warnings=warnings,
             page_infos=response_page_infos,
             page_texts=response_page_texts,
+            page_images=encode_page_images(raw_page_images) if raw_page_images else None,
         )

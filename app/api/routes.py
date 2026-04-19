@@ -5,8 +5,11 @@ import json
 import logging
 import math
 import re
+import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
@@ -46,6 +49,12 @@ ALLOWED_MIME_TYPES = {
     "image/tiff",
     "image/x-tiff",
     "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_WORD_DOCUMENT_TYPES = {
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 _WORD_RE = re.compile(r"\S+")
 
@@ -74,6 +83,12 @@ def _sniff_content_type(payload: bytes) -> str | None:
         return "application/pdf"
     if len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
         return "image/webp"
+    # OLE2 Compound Document (legacy .doc)
+    if payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return "application/msword"
+    # ZIP-based Office Open XML (.docx) — check for word/ entry
+    if payload.startswith(b"PK\x03\x04") and b"word/" in payload[:2000]:
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return None
 
 
@@ -96,6 +111,42 @@ def _resolve_effective_content_type(content_type: str | None, payload: bytes) ->
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Nicht unterstützter Datei-Inhaltstyp: {normalized}",
     )
+
+
+def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
+    """Convert a DOC/DOCX file to PDF via LibreOffice headless."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        input_path = Path(tmp_dir) / f"input{suffix}"
+        input_path.write_bytes(doc_bytes)
+        result = subprocess.run(
+            [
+                "libreoffice",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                tmp_dir,
+                str(input_path),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")
+            raise ValueError(f"LibreOffice-Konvertierung fehlgeschlagen: {stderr}")
+        pdf_path = input_path.with_suffix(".pdf")
+        if not pdf_path.exists():
+            raise ValueError("LibreOffice-Konvertierung hat keine PDF-Datei erzeugt.")
+        return pdf_path.read_bytes()
+
+
+def _maybe_convert_word(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
+    """If content_type is DOC/DOCX, convert to PDF. Otherwise pass through."""
+    if content_type not in _WORD_DOCUMENT_TYPES:
+        return image_bytes, content_type
+    suffix = ".doc" if content_type == "application/msword" else ".docx"
+    pdf_bytes = _convert_word_to_pdf(image_bytes, suffix=suffix)
+    return pdf_bytes, "application/pdf"
 
 
 def _query_param(request: Request, name: str) -> str | None:
@@ -1066,6 +1117,7 @@ async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
+    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(
@@ -1333,6 +1385,7 @@ async def ocr(
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
+    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(
@@ -1398,6 +1451,7 @@ async def ocr(
         "layout": result.layout,
         "tables": analyze_result.get("tables", []),
         "layout_visualizations": result.layout_visualizations,
+        "page_images": result.page_images,
         "model": result.model,
         "mode": result.mode,
         "schema_name": result.schema_name,
@@ -1501,7 +1555,7 @@ async def _call_azure_read(
         "Ocp-Apim-Subscription-Key": key,
         "Content-Type": content_type or "application/octet-stream",
     }
-    params = {"api-version": "2023-07-31"}
+    params = {"api-version": AZURE_API_VERSION}
     async with httpx.AsyncClient(timeout=timeout_s, verify=verify_ssl) as client:
         resp = await client.post(url, content=image_bytes, headers=headers, params=params)
         resp.raise_for_status()
@@ -1546,6 +1600,7 @@ async def compare_with_azure(
     else:
         image_bytes = await request.body()
         content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+    image_bytes, content_type = _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")
