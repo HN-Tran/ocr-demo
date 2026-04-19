@@ -807,6 +807,10 @@ class DocumentPipeline:
             if selected_word_detector is not None:
                 try:
                     word_polys = selected_word_detector.detect(page_image)
+                    # Strip detector-provided text so word content always
+                    # comes from the primary OCR's region text.
+                    for wp in word_polys:
+                        wp.pop("content", None)
                     page_layout["word_polys"] = _assign_word_content(
                         word_polys, cast(list, page_layout.get("regions", []))
                     )

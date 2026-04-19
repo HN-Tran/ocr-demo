@@ -1,7 +1,8 @@
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    VERIFY_SSL=false
 
 ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
 

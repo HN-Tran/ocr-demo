@@ -1573,10 +1573,12 @@ async function runOCR() {
       body: payload,
       signal: controller.signal,
     });
-    const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "OCR fehlgeschlagen");
+      let detail;
+      try { detail = (await response.json()).detail; } catch { detail = null; }
+      throw new Error(detail || `HTTP ${response.status}: ${response.statusText}`);
     }
+    const data = await response.json();
 
     lastResponse = data;
     setAdvancedDirty(false);

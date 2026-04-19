@@ -1493,6 +1493,7 @@ async def _call_azure_read(
     image_bytes: bytes,
     content_type: str,
     timeout_s: float = 60.0,
+    verify_ssl: bool = True,
 ) -> dict[str, object]:
     """Call Azure prebuilt-read endpoint and return the analyzeResult dict."""
     url = f"{endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
@@ -1501,7 +1502,7 @@ async def _call_azure_read(
         "Content-Type": content_type or "application/octet-stream",
     }
     params = {"api-version": "2023-07-31"}
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
+    async with httpx.AsyncClient(timeout=timeout_s, verify=verify_ssl) as client:
         resp = await client.post(url, content=image_bytes, headers=headers, params=params)
         resp.raise_for_status()
         if resp.status_code == 200:
@@ -1566,7 +1567,10 @@ async def compare_with_azure(
             expert_enable_layout=expert_enable_layout,
             expert_layout_threshold=expert_layout_threshold,
         )
-        azure_task = _call_azure_read(azure_endpoint, azure_key, image_bytes, content_type)
+        azure_task = _call_azure_read(
+            azure_endpoint, azure_key, image_bytes, content_type,
+            verify_ssl=settings.verify_ssl,
+        )
         (our_result, _), azure_response = await asyncio.gather(our_task, azure_task)
     except (ValueError, TimeoutError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

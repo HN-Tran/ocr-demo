@@ -51,6 +51,7 @@ class Settings:
     request_timeout_s: float
     max_upload_bytes: int
     max_image_dim: int
+    verify_ssl: bool
     host: str
     port: int
 
@@ -84,6 +85,7 @@ def get_settings() -> Settings:
         ocr_expert_table_transformer=_env_bool("OCR_EXPERT_TABLE_TRANSFORMER", False),
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "none").strip().lower(),
         default_token_limit=default_token_limit,
+        verify_ssl=_env_bool("VERIFY_SSL", False),
         request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 120.0),
         max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 8 * 1024 * 1024),
         max_image_dim=_env_int("MAX_IMAGE_DIM", 2048),
