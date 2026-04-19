@@ -114,14 +114,26 @@ def _resolve_effective_content_type(content_type: str | None, payload: bytes) ->
 
 
 def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
-    """Convert a DOC/DOCX file to PDF via LibreOffice headless."""
+    """Convert a DOC/DOCX file to PDF via LibreOffice headless.
+
+    The ``-env:UserInstallation`` flag pins LibreOffice's user profile to a
+    writable tmp dir. Without it, LibreOffice tries ``$HOME`` which can be
+    missing or read-only in containerized/cluster environments, causing the
+    process to hang until the request times out (504).
+    """
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_path = Path(tmp_dir) / f"input{suffix}"
         input_path.write_bytes(doc_bytes)
+        profile_dir = Path(tmp_dir) / "profile"
+        profile_dir.mkdir()
         result = subprocess.run(
             [
                 "libreoffice",
+                f"-env:UserInstallation=file://{profile_dir}",
                 "--headless",
+                "--norestore",
+                "--nologo",
+                "--nofirststartwizard",
                 "--convert-to",
                 "pdf",
                 "--outdir",
@@ -129,7 +141,7 @@ def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
                 str(input_path),
             ],
             capture_output=True,
-            timeout=60,
+            timeout=90,
         )
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace")
