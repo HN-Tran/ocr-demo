@@ -16,9 +16,8 @@ import time
 from html import unescape
 from typing import Any, cast
 
-from rapidfuzz import fuzz
-
 from PIL import Image
+from rapidfuzz import fuzz
 
 from app.services.layout_detector import HFLayoutDetector, LayoutDetectorConfig
 from app.services.ocr_pipeline import (
@@ -730,7 +729,9 @@ class DocumentPipeline:
             key = expert_word_detector.strip().lower()
             if key not in self._word_detector_cache:
                 try:
-                    self._word_detector_cache[key] = create_word_detector(expert_word_detector)
+                    self._word_detector_cache[key] = await asyncio.to_thread(
+                        create_word_detector, expert_word_detector
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Wort-Detektor-Initialisierung fehlgeschlagen: %s", exc)
                     word_detector_warning = f"Wort-Detektor nicht verfügbar: {exc}"
@@ -810,7 +811,9 @@ class DocumentPipeline:
             )
             if selected_word_detector is not None:
                 try:
-                    word_polys = selected_word_detector.detect(page_image)
+                    word_polys = await asyncio.to_thread(
+                        selected_word_detector.detect, page_image
+                    )
                     # Strip detector-provided text so word content always
                     # comes from the primary OCR's region text.
                     for wp in word_polys:

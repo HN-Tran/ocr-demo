@@ -184,9 +184,9 @@ function setAdvancedOpen(isOpen) {
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
   document.body.classList.toggle("is-loading", isLoading);
-  const mainEl = document.querySelector("main");
-  if (mainEl) {
-    mainEl.inert = isLoading;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = isLoading;
   }
   if (!isLoading) {
     applyOptionsBtnEl.disabled = !hasPendingAdvancedChanges;

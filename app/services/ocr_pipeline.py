@@ -33,7 +33,8 @@ MAX_TOKEN_LIMIT = 128000
 DEFAULT_GIF_MAX_FRAMES = 8
 MAX_GIF_MAX_FRAMES = 32
 MAX_GIF_STORYBOARD_FRAMES = 4
-PDF_RENDER_SCALE = 2.0
+PDF_RENDER_DPI = 300
+PDF_RENDER_SCALE = PDF_RENDER_DPI / 72.0
 AUTO_SCHEMA_NAME = "auto"
 PLAIN_TASK_PROMPTS: dict[str, str] = {
     PLAIN_TASK_DESCRIBE_IMAGE: "Describe this image briefly.",
@@ -243,7 +244,6 @@ class OCRPipeline:
                 bitmap = None
                 try:
                     page = document[page_index]
-                    # Roughly 144 DPI. This keeps PDF OCR readable without exploding latency/memory.
                     bitmap = page.render(scale=PDF_RENDER_SCALE)
                     image = bitmap.to_pil()
                     output = BytesIO()

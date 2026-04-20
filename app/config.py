@@ -88,7 +88,7 @@ def get_settings() -> Settings:
         verify_ssl=_env_bool("VERIFY_SSL", False),
         request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 120.0),
         max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 8 * 1024 * 1024),
-        max_image_dim=_env_int("MAX_IMAGE_DIM", 2048),
+        max_image_dim=_env_int("MAX_IMAGE_DIM", 3600),
         host=os.getenv("HOST", "127.0.0.1"),
         port=_env_int("PORT", 8000),
     )
