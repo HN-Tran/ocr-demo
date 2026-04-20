@@ -46,6 +46,7 @@ class Settings:
     ocr_expert_enable_layout: bool
     ocr_expert_layout_model: str
     ocr_expert_table_transformer: bool
+    ocr_expert_per_region_ocr: bool
     ocr_word_detector: str
     default_token_limit: int
     request_timeout_s: float
@@ -83,6 +84,7 @@ def get_settings() -> Settings:
             "OCR_EXPERT_LAYOUT_MODEL", "PaddlePaddle/PP-DocLayoutV3_safetensors"
         ),
         ocr_expert_table_transformer=_env_bool("OCR_EXPERT_TABLE_TRANSFORMER", False),
+        ocr_expert_per_region_ocr=_env_bool("OCR_EXPERT_PER_REGION_OCR", True),
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "none").strip().lower(),
         default_token_limit=default_token_limit,
         verify_ssl=_env_bool("VERIFY_SSL", False),

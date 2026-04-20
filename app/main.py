@@ -72,6 +72,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         layout_model=settings.ocr_expert_layout_model,
         timeout_s=settings.request_timeout_s,
         enable_table_transformer=settings.ocr_expert_table_transformer,
+        enable_per_region_ocr=settings.ocr_expert_per_region_ocr,
         word_detector=_try_create_word_detector(settings.ocr_word_detector),
     )
     ocr_backend_router = OCRBackendRouter(
@@ -119,6 +120,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_expert_enable_layout": settings.ocr_expert_enable_layout,
                 "default_expert_layout_model": settings.ocr_expert_layout_model,
                 "default_expert_table_transformer": settings.ocr_expert_table_transformer,
+                "default_expert_per_region_ocr": settings.ocr_expert_per_region_ocr,
                 "default_expert_word_detector": settings.ocr_word_detector,
                 "static_version": version,
                 "app_base_path": app_base_path,

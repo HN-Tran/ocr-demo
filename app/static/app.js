@@ -2023,6 +2023,12 @@ advancedPanelEl.addEventListener("change", () => {
 advancedPanelEl.addEventListener("input", () => {
   setAdvancedDirty(true);
 });
+advancedPanelEl
+  .querySelectorAll("input, select, textarea")
+  .forEach((el) => {
+    el.addEventListener("change", () => setAdvancedDirty(true));
+    el.addEventListener("input", () => setAdvancedDirty(true));
+  });
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   void runOCR();

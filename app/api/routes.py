@@ -1158,6 +1158,7 @@ async def _run_plain_ocr(
     expert_layout_model: str | None = None,
     expert_layout_threshold: float | None = None,
     expert_table_transformer: bool | None = None,
+    expert_per_region_ocr: bool | None = None,
     expert_word_detector: str | None = None,
 ) -> tuple[object, str]:
     try:
@@ -1203,6 +1204,7 @@ async def _execute_compat_analyze_operation(
     expert_layout_model: str | None = None,
     expert_layout_threshold: float | None = None,
     expert_table_transformer: bool | None = None,
+    expert_per_region_ocr: bool | None = None,
     expert_word_detector: str | None = None,
 ) -> None:
     try:
@@ -1216,6 +1218,7 @@ async def _execute_compat_analyze_operation(
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
             expert_word_detector=expert_word_detector,
         )
         completed_at = datetime.now(timezone.utc)
@@ -1352,6 +1355,7 @@ async def ocr(
     expert_layout_model: str | None = Form(None),
     expert_layout_threshold: float | None = Form(None),
     expert_table_transformer: bool | None = Form(None),
+    expert_per_region_ocr: bool | None = Form(None),
     expert_word_detector: str | None = Form(None),
     backend: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
@@ -1387,6 +1391,11 @@ async def ocr(
         expert_table_transformer,
         _query_param(request, "expert_table_transformer"),
         "expert_table_transformer",
+    )
+    expert_per_region_ocr = _resolve_bool_param(
+        expert_per_region_ocr,
+        _query_param(request, "expert_per_region_ocr"),
+        "expert_per_region_ocr",
     )
     expert_word_detector = _resolve_text_param(
         expert_word_detector, _query_param(request, "expert_word_detector"), None
@@ -1430,6 +1439,7 @@ async def ocr(
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
             expert_word_detector=expert_word_detector,
         )
     except ValueError as exc:
@@ -1861,6 +1871,7 @@ async def compat_sync_analyze(
     expert_layout_model: str | None = Query(None),
     expert_layout_threshold: float | None = Query(None),
     expert_table_transformer: bool | None = Query(None),
+    expert_per_region_ocr: bool | None = Query(None),
     expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
@@ -1881,6 +1892,7 @@ async def compat_sync_analyze(
         expert_layout_model=expert_layout_model,
         expert_layout_threshold=expert_layout_threshold,
         expert_table_transformer=expert_table_transformer,
+        expert_per_region_ocr=expert_per_region_ocr,
         expert_word_detector=expert_word_detector,
     )
     completed_at = datetime.now(timezone.utc)
@@ -1910,6 +1922,7 @@ async def compat_analyze(
     expert_layout_model: str | None = Query(None),
     expert_layout_threshold: float | None = Query(None),
     expert_table_transformer: bool | None = Query(None),
+    expert_per_region_ocr: bool | None = Query(None),
     expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
@@ -1940,6 +1953,7 @@ async def compat_analyze(
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
             expert_word_detector=expert_word_detector,
         )
     )

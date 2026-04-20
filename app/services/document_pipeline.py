@@ -506,6 +506,7 @@ class DocumentPipeline:
         layout_model: str,
         timeout_s: float,
         enable_table_transformer: bool = False,
+        enable_per_region_ocr: bool = True,
         word_detector: WordDetector | None = None,
     ) -> None:
         self.direct_pipeline = direct_pipeline
@@ -515,6 +516,7 @@ class DocumentPipeline:
         self.layout_model = layout_model
         self.timeout_s = timeout_s
         self.enable_table_transformer = enable_table_transformer
+        self.enable_per_region_ocr = enable_per_region_ocr
         self.word_detector: WordDetector | None = word_detector
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
@@ -619,6 +621,7 @@ class DocumentPipeline:
         detector: HFLayoutDetector,
         page_number: int,
         use_table_transformer: bool = False,
+        per_region_ocr: bool = True,
     ) -> tuple[dict[str, object], str, list[str]]:
         """Full-page OCR + layout detection, return (page_layout, page_text, warnings)."""
         warnings: list[str] = []
@@ -655,6 +658,8 @@ class DocumentPipeline:
             }
 
             if task_type == "skip":
+                layout_region["content"] = ""
+            elif not per_region_ocr:
                 layout_region["content"] = ""
             else:
                 try:
@@ -710,6 +715,7 @@ class DocumentPipeline:
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
+        expert_per_region_ocr: bool | None = None,
         expert_word_detector: str | None = None,
     ) -> OCRResult:
         selected_model = (model or "").strip() or self.default_model
@@ -722,6 +728,11 @@ class DocumentPipeline:
             self.enable_table_transformer
             if expert_table_transformer is None
             else expert_table_transformer
+        )
+        selected_per_region_ocr = (
+            self.enable_per_region_ocr
+            if expert_per_region_ocr is None
+            else expert_per_region_ocr
         )
         selected_word_detector: WordDetector | None = self.word_detector
         word_detector_warning: str | None = None
@@ -808,6 +819,7 @@ class DocumentPipeline:
                 detector=detector,
                 page_number=page_number,
                 use_table_transformer=selected_table_transformer,
+                per_region_ocr=selected_per_region_ocr,
             )
             if selected_word_detector is not None:
                 try:

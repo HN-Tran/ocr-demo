@@ -202,6 +202,22 @@
             </label>
 
             <label>
+              Dev: Regionen-OCR
+              <select id="expert_per_region_ocr" name="expert_per_region_ocr">
+                <option value="" selected>
+                  Standard ({{ "An" if default_expert_per_region_ocr else "Aus" }})
+                </option>
+                <option value="true">An</option>
+                <option value="false">Aus</option>
+              </select>
+              <span class="hint">
+                Führt für jede erkannte Layout-Region eine separate OCR durch und
+                gleicht das Ergebnis mit der Seiten-OCR ab. Ausschalten spart Zeit
+                und Speicher, liefert aber keine per-Region-Texte.
+              </span>
+            </label>
+
+            <label>
               Dev: Wort-Erkennung
               <select id="expert_word_detector" name="expert_word_detector">
                 <option value="" selected>
