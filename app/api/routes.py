@@ -57,6 +57,7 @@ _WORD_DOCUMENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 _WORD_RE = re.compile(r"\S+")
+logger = logging.getLogger(__name__)
 
 
 def _isoformat_utc(value: datetime) -> str:
@@ -1497,34 +1498,35 @@ def _iou_bbox(a: tuple[float, float, float, float], b: tuple[float, float, float
     return inter / union if union > 0 else 0.0
 
 
-def _normalize_azure_words(pages: list[object]) -> list[dict[str, object]]:
-    """Normalize Azure word polygon coords from pixels to 0-1000 scale."""
-    if not pages:
-        return []
-    page = pages[0]
-    if not isinstance(page, dict):
-        return []
-    pw = float(page.get("width") or 1000)
-    ph = float(page.get("height") or 1000)
-    result: list[dict[str, object]] = []
-    for word in page.get("words") or []:
-        if not isinstance(word, dict):
+def _normalize_azure_words_per_page(pages: list[object]) -> list[list[dict[str, object]]]:
+    """Normalize Azure word polygon coords from pixels to 0-1000 scale, per page."""
+    result_pages: list[list[dict[str, object]]] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            result_pages.append([])
             continue
-        polygon = word.get("polygon", [])
-        if isinstance(polygon, list) and len(polygon) >= 8:
-            norm: list[float] = [
-                float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(polygon)
-            ]
-        else:
-            norm = []
-        result.append(
-            {
-                "content": word.get("content", ""),
-                "polygon": norm,
-                "confidence": word.get("confidence", 0.0),
-            }
-        )
-    return result
+        pw = float(page.get("width") or 1000)
+        ph = float(page.get("height") or 1000)
+        page_words: list[dict[str, object]] = []
+        for word in page.get("words") or []:
+            if not isinstance(word, dict):
+                continue
+            polygon = word.get("polygon", [])
+            if isinstance(polygon, list) and len(polygon) >= 8:
+                norm: list[float] = [
+                    float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(polygon)
+                ]
+            else:
+                norm = []
+            page_words.append(
+                {
+                    "content": word.get("content", ""),
+                    "polygon": norm,
+                    "confidence": word.get("confidence", 0.0),
+                }
+            )
+        result_pages.append(page_words)
+    return result_pages
 
 
 _DIFF_PUNCT_RE = re.compile(r"[\s\u00a0\u200b\.,;:!?\"'`´‘’“”„‚()\[\]{}<>/\\|_*-]+")
@@ -1711,8 +1713,8 @@ async def compare_with_azure(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß."
         )
 
-    try:
-        our_task = pipeline.run(
+    our_task = asyncio.create_task(
+        pipeline.run(
             backend=backend,
             image_bytes=image_bytes,
             content_type=content_type,
@@ -1726,20 +1728,48 @@ async def compare_with_azure(
             expert_enable_layout=expert_enable_layout,
             expert_layout_threshold=expert_layout_threshold,
         )
-        azure_task = _call_azure_read(
+    )
+    azure_task = asyncio.create_task(
+        _call_azure_read(
             azure_endpoint,
             azure_key,
             image_bytes,
             content_type,
             verify_ssl=settings.verify_ssl,
         )
-        (our_result, _), azure_response = await asyncio.gather(our_task, azure_task)
-    except (ValueError, TimeoutError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
+    )
+    our_outcome, azure_outcome = await asyncio.gather(our_task, azure_task, return_exceptions=True)
+
+    if isinstance(our_outcome, BaseException):
+        logger.exception("Unser OCR im Compare-Flow fehlgeschlagen", exc_info=our_outcome)
+        if isinstance(our_outcome, ValueError | TimeoutError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unser OCR-Fehler: {our_outcome}",
+            ) from our_outcome
+        if isinstance(our_outcome, httpx.HTTPError):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"OCR-Backend nicht erreichbar: {our_outcome}",
+            ) from our_outcome
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Azure-Fehler: {exc}"
-        ) from exc
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OCR-Pipeline-Fehler: {type(our_outcome).__name__}: {our_outcome}",
+        ) from our_outcome
+    if isinstance(azure_outcome, BaseException):
+        logger.exception("Azure-Aufruf im Compare-Flow fehlgeschlagen", exc_info=azure_outcome)
+        if isinstance(azure_outcome, ValueError | TimeoutError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Azure-Fehler: {azure_outcome}",
+            ) from azure_outcome
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Azure-Fehler: {azure_outcome}",
+        ) from azure_outcome
+
+    our_result, _ = our_outcome
+    azure_response = azure_outcome
 
     our_analyze = _build_analyze_result(
         content=our_result.text,
@@ -1748,31 +1778,50 @@ async def compare_with_azure(
         page_infos=getattr(our_result, "page_infos", None),
         page_texts=getattr(our_result, "page_texts", None),
     )
-    our_pages = our_analyze.get("pages")
-    our_words: list[dict[str, object]] = []
-    if isinstance(our_pages, list) and our_pages:
-        first = our_pages[0]
-        if isinstance(first, dict):
-            w = first.get("words")
+    our_pages_raw = our_analyze.get("pages")
+    our_pages = our_pages_raw if isinstance(our_pages_raw, list) else []
+    our_words_per_page: list[list[dict[str, object]]] = []
+    for page in our_pages:
+        words: list[dict[str, object]] = []
+        if isinstance(page, dict):
+            w = page.get("words")
             if isinstance(w, list):
-                our_words = cast(list[dict[str, object]], w)
+                words = cast(list[dict[str, object]], w)
+        our_words_per_page.append(words)
 
     raw_azure = azure_response.get("analyzeResult")
     azure_analyze: dict[str, object] = raw_azure if isinstance(raw_azure, dict) else azure_response
     raw_pages = azure_analyze.get("pages")
     azure_pages: list[object] = raw_pages if isinstance(raw_pages, list) else []
-    azure_words_normalized = _normalize_azure_words(azure_pages)
+    azure_words_per_page = _normalize_azure_words_per_page(azure_pages)
     raw_content = azure_analyze.get("content")
     azure_text = str(raw_content) if raw_content is not None else ""
 
-    diff = _diff_word_polygons(our_words, azure_words_normalized)
+    page_count = max(len(our_words_per_page), len(azure_words_per_page), 1)
+    diff_pages: list[dict[str, object]] = []
+    matched_total = mismatched_total = only_ours_total = only_azure_total = 0
+    for i in range(page_count):
+        ours_page = our_words_per_page[i] if i < len(our_words_per_page) else []
+        azure_page = azure_words_per_page[i] if i < len(azure_words_per_page) else []
+        page_diff = _diff_word_polygons(ours_page, azure_page)
+        diff_pages.append(page_diff)
+        matched_total += int(cast(int, page_diff.get("matched_count", 0)))
+        mismatched_total += int(cast(int, page_diff.get("mismatched_count", 0)))
+        only_ours_total += len(cast(list, page_diff.get("only_ours", [])))
+        only_azure_total += len(cast(list, page_diff.get("only_azure", [])))
 
     return {
         "our_text": our_result.text,
         "azure_text": azure_text,
-        "our_words": our_words,
-        "azure_words": azure_words_normalized,
-        "diff": diff,
+        "our_words_per_page": our_words_per_page,
+        "azure_words_per_page": azure_words_per_page,
+        "diff": {
+            "pages": diff_pages,
+            "matched_count": matched_total,
+            "mismatched_count": mismatched_total,
+            "only_ours_count": only_ours_total,
+            "only_azure_count": only_azure_total,
+        },
         "our_warnings": our_result.warnings,
     }
 

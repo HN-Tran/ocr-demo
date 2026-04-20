@@ -1390,10 +1390,6 @@ pre {
 body.is-loading {
   cursor: progress;
 }
-body.is-loading main,
-body.is-loading .global-drop-overlay {
-  pointer-events: none;
-}
 
 .spinner {
   width: 1rem;

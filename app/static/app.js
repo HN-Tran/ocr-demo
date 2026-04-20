@@ -68,6 +68,7 @@ const ocrEndpoint = `${appBasePath}/api/ocr`;
 const compareEndpoint = `${appBasePath}/api/compare`;
 
 let lastResponse = null;
+let lastDiff = null;
 let lastTableMatrices = [];
 let previewUrl = null;
 let activeRequestController = null;
@@ -183,16 +184,10 @@ function setAdvancedOpen(isOpen) {
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
   document.body.classList.toggle("is-loading", isLoading);
-  const disableables = document.querySelectorAll(
-    "#ocr-form input, #ocr-form select, #ocr-form button, " +
-    "#advanced-panel input, #advanced-panel select, #advanced-panel button, " +
-    "#compare-form input, #compare-form button, " +
-    ".result-view-btn, #word-toggle-btn, #page-selector, " +
-    "#pick-file-btn, #change-file-btn, #copy-btn, #download-btn, #download-csv-btn"
-  );
-  disableables.forEach((el) => {
-    el.disabled = isLoading;
-  });
+  const mainEl = document.querySelector("main");
+  if (mainEl) {
+    mainEl.inert = isLoading;
+  }
   if (!isLoading) {
     applyOptionsBtnEl.disabled = !hasPendingAdvancedChanges;
   }
@@ -206,6 +201,7 @@ function setAdvancedDirty(isDirty) {
 
 function clearOutput() {
   outputEl.textContent = "";
+  lastDiff = null;
   clearMarkdownPreview();
   clearDiffPanel();
   clearResultViewSwitch();
@@ -395,6 +391,11 @@ function showPageImage(index) {
   renderLayoutOverlay(layoutPages, index);
   renderLayoutPanel(layoutPages, lastResponse?.layout_visualizations, index);
   wordToggleBtnEl.setAttribute("aria-pressed", "false");
+  if (activeResultView === "diff" && lastDiff) {
+    const pageDiff = getActivePageDiff();
+    renderDiffOverlay(pageDiff);
+    renderDiffPanel(pageDiff);
+  }
 }
 
 function clearLayoutOverlay() {
@@ -442,6 +443,25 @@ function setActiveResultView(viewName, availableViews) {
     }
   });
   resultViewSwitchEl.classList.toggle("hidden", availableViews.length <= 1);
+  syncOverlayToActiveView();
+}
+
+function syncOverlayToActiveView() {
+  const layoutPages = normalizeLayoutPages(lastResponse?.layout);
+  if (activeResultView === "diff" && lastDiff) {
+    renderDiffOverlay(getActivePageDiff());
+    renderDiffPanel(getActivePageDiff());
+  } else {
+    renderDiffOverlay(null);
+    if (layoutPages.length > 0) {
+      renderLayoutOverlay(layoutPages, currentPageIndex);
+    }
+  }
+}
+
+function getActivePageDiff() {
+  if (!lastDiff || !Array.isArray(lastDiff.pages)) return null;
+  return lastDiff.pages[currentPageIndex] || lastDiff.pages[0] || null;
 }
 
 function configurePlainResultViews({ hasLayout, hasMarkdown }) {
@@ -960,6 +980,10 @@ function clearDiffPanel() {
 
 function renderDiffPanel(diff) {
   if (!diffGroupsEl) return;
+  if (!diff) {
+    clearDiffPanel();
+    return;
+  }
   const matched = diff.matched || [];
   const mismatched = diff.mismatched || [];
   const onlyOurs = diff.only_ours || [];
@@ -2085,7 +2109,9 @@ compareFormEl.addEventListener("submit", async (event) => {
 
   compareSummaryEl.textContent = "Vergleich läuft…";
   compareSummaryEl.classList.remove("hidden");
+  lastDiff = null;
   clearDiffPanel();
+  renderDiffOverlay(null);
 
   const fd = new FormData();
   fd.append("file", file);
@@ -2103,20 +2129,20 @@ compareFormEl.addEventListener("submit", async (event) => {
       return;
     }
     const data = await resp.json();
-    const diff = data.diff || {};
-    const matched = diff.matched || [];
-    const mismatched = diff.mismatched || [];
-    const onlyOurs = diff.only_ours || [];
-    const onlyAzure = diff.only_azure || [];
+    lastDiff = data.diff || null;
+    const pageCount = Array.isArray(lastDiff?.pages) ? lastDiff.pages.length : 0;
+    const matchedTotal = lastDiff?.matched_count ?? 0;
+    const mismatchedTotal = lastDiff?.mismatched_count ?? 0;
+    const onlyOursTotal = lastDiff?.only_ours_count ?? 0;
+    const onlyAzureTotal = lastDiff?.only_azure_count ?? 0;
 
-    renderDiffOverlay(diff);
-    renderDiffPanel(diff);
-
+    const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
     compareSummaryEl.innerHTML =
-      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matched.length}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatched.length}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOurs.length}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzure.length}</b></span>`;
+      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzureTotal}</b></span>` +
+      `<span class="compare-total-hint">${pageLabel}</span>`;
     compareSummaryEl.classList.remove("hidden");
 
     if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
