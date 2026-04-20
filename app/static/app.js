@@ -17,13 +17,23 @@ const previewWrapEl = document.getElementById("preview-wrap");
 const resultPanelEl = document.getElementById("result-panel");
 const globalDropOverlayEl = document.getElementById("global-drop-overlay");
 const outputEl = document.getElementById("output");
-const rawWrapEl = document.getElementById("raw-wrap");
 const markdownPreviewWrapEl = document.getElementById("markdown-preview-wrap");
 const markdownPreviewEl = document.getElementById("markdown-preview");
 const resultViewSwitchEl = document.getElementById("result-view-switch");
 const resultViewLayoutBtnEl = document.getElementById("result-view-layout-btn");
 const resultViewMarkdownBtnEl = document.getElementById("result-view-markdown-btn");
-const resultViewRawBtnEl = document.getElementById("result-view-raw-btn");
+const resultViewDiffBtnEl = document.getElementById("result-view-diff-btn");
+const diffWrapEl = document.getElementById("diff-wrap");
+const diffGroupsEl = document.getElementById("diff-groups");
+const diffEmptyEl = document.getElementById("diff-empty");
+const diffMatchedListEl = document.getElementById("diff-matched-list");
+const diffMismatchListEl = document.getElementById("diff-mismatch-list");
+const diffOursListEl = document.getElementById("diff-ours-list");
+const diffAzureListEl = document.getElementById("diff-azure-list");
+const diffMatchedCountEl = document.getElementById("diff-matched-count");
+const diffMismatchCountEl = document.getElementById("diff-mismatch-count");
+const diffOursCountEl = document.getElementById("diff-ours-count");
+const diffAzureCountEl = document.getElementById("diff-azure-count");
 const jsonOutputEl = document.getElementById("json-output");
 const tablePreviewWrapEl = document.getElementById("table-preview-wrap");
 const tablePreviewBodyEl = document.getElementById("table-preview-body");
@@ -53,9 +63,6 @@ const azureKeyEl = document.getElementById("azure-key");
 const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
 const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
-const compareTextDiffEl = document.getElementById("compare-text-diff");
-const compareOurTextEl = document.getElementById("compare-our-text");
-const compareAzureTextEl = document.getElementById("compare-azure-text");
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
 const compareEndpoint = `${appBasePath}/api/compare`;
@@ -125,12 +132,12 @@ const LAYOUT_REGION_KIND_ALIASES = new Map([
 const RESULT_VIEW_BUTTONS = {
   layout: resultViewLayoutBtnEl,
   markdown: resultViewMarkdownBtnEl,
-  raw: resultViewRawBtnEl,
+  diff: resultViewDiffBtnEl,
 };
 const RESULT_VIEW_WRAPS = {
   layout: layoutWrapEl,
   markdown: markdownPreviewWrapEl,
-  raw: rawWrapEl,
+  diff: diffWrapEl,
 };
 
 function isStructuredMode(modeValue) {
@@ -191,9 +198,8 @@ function setAdvancedDirty(isDirty) {
 
 function clearOutput() {
   outputEl.textContent = "";
-  outputEl.classList.remove("hidden");
-  rawWrapEl.classList.add("hidden");
   clearMarkdownPreview();
+  clearDiffPanel();
   clearResultViewSwitch();
   jsonOutputEl.innerHTML = "";
   tablePreviewBodyEl.innerHTML = "";
@@ -432,8 +438,8 @@ function configurePlainResultViews({ hasLayout, hasMarkdown }) {
   if (hasMarkdown) {
     availableViews.push("markdown");
   }
-  availableViews.push("raw");
-  const defaultView = hasLayout ? "layout" : hasMarkdown ? "markdown" : "raw";
+  availableViews.push("diff");
+  const defaultView = hasLayout ? "layout" : hasMarkdown ? "markdown" : "diff";
   setActiveResultView(defaultView, availableViews);
 }
 
@@ -859,27 +865,24 @@ function applyWordMode(active, layoutPages) {
 }
 
 function renderDiffOverlay(diff) {
-  // Remove existing diff layer and normal layout overlay
   const existingDiff = previewLayoutOverlayEl.querySelector(".preview-diff-svg");
   if (existingDiff) existingDiff.remove();
 
   if (!diff) {
-    // Restore normal layout overlay
     previewLayoutOverlayEl.querySelectorAll(".preview-layout-svg, .preview-layout-box").forEach(
       (el) => el.classList.remove("hidden")
     );
     return;
   }
 
-  // Hide normal layout overlay
   previewLayoutOverlayEl.querySelectorAll(".preview-layout-svg:not(.preview-diff-svg), .preview-layout-box").forEach(
     (el) => el.classList.add("hidden")
   );
 
+  const matched = diff.matched || [];
+  const mismatched = diff.mismatched || [];
   const onlyOurs = diff.only_ours || [];
   const onlyAzure = diff.only_azure || [];
-  const matchedOurs = diff.matched_ours || [];
-  const matchedAzure = diff.matched_azure || [];
 
   const svgNs = "http://www.w3.org/2000/svg";
   const svgEl = document.createElementNS(svgNs, "svg");
@@ -889,24 +892,125 @@ function renderDiffOverlay(diff) {
   previewLayoutOverlayEl.appendChild(svgEl);
   previewLayoutOverlayEl.classList.remove("hidden");
 
-  function addShapes(words, cssClass, labelPrefix) {
-    (words || []).forEach((w) => {
-      const points = normalizedPolygonToPercentages(w.polygon);
-      if (!points) return;
-      const el = document.createElementNS(svgNs, "polygon");
-      el.classList.add(cssClass);
-      el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
-      const titleEl = document.createElementNS(svgNs, "title");
-      titleEl.textContent = `${labelPrefix}: ${w.content || ""}`;
-      el.appendChild(titleEl);
-      svgEl.appendChild(el);
-    });
+  function addShape(word, cssClass, title, pairKey) {
+    if (!word) return;
+    const points = normalizedPolygonToPercentages(word.polygon);
+    if (!points) return;
+    const el = document.createElementNS(svgNs, "polygon");
+    el.classList.add(cssClass);
+    el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
+    if (pairKey) el.setAttribute("data-pair-key", pairKey);
+    const titleEl = document.createElementNS(svgNs, "title");
+    titleEl.textContent = title;
+    el.appendChild(titleEl);
+    svgEl.appendChild(el);
   }
 
-  addShapes(matchedOurs, "preview-diff-shape-matched", "Übereinstimmung");
-  addShapes(matchedAzure, "preview-diff-shape-matched-azure", "Übereinstimmung (Azure)");
-  addShapes(onlyOurs, "preview-diff-shape-ours", "Nur wir");
-  addShapes(onlyAzure, "preview-diff-shape-missing", "Nur Azure");
+  matched.forEach((pair, idx) => {
+    const key = `m-${idx}`;
+    const text = pair.ours?.content || pair.azure?.content || "";
+    addShape(pair.ours, "preview-diff-shape-matched", `Übereinstimmung: ${text}`, key);
+    addShape(pair.azure, "preview-diff-shape-matched preview-diff-shape-matched-azure", `Übereinstimmung (Azure): ${text}`, key);
+  });
+  mismatched.forEach((pair, idx) => {
+    const key = `x-${idx}`;
+    const ours = pair.ours?.content || "";
+    const azure = pair.azure?.content || "";
+    const title = `Abweichung — Unser: "${ours}" | Azure: "${azure}"`;
+    addShape(pair.ours, "preview-diff-shape-mismatch preview-diff-shape-mismatch-ours", title, key);
+    addShape(pair.azure, "preview-diff-shape-mismatch preview-diff-shape-mismatch-azure", title, key);
+  });
+  onlyOurs.forEach((w, idx) => {
+    addShape(w, "preview-diff-shape-ours", `Nur wir: ${w.content || ""}`, `o-${idx}`);
+  });
+  onlyAzure.forEach((w, idx) => {
+    addShape(w, "preview-diff-shape-azure", `Nur Azure: ${w.content || ""}`, `a-${idx}`);
+  });
+}
+
+function clearDiffPanel() {
+  if (!diffGroupsEl) return;
+  diffGroupsEl.classList.add("hidden");
+  if (diffEmptyEl) diffEmptyEl.classList.remove("hidden");
+  [diffMatchedListEl, diffMismatchListEl, diffOursListEl, diffAzureListEl].forEach((el) => {
+    if (el) el.innerHTML = "";
+  });
+  [diffMatchedCountEl, diffMismatchCountEl, diffOursCountEl, diffAzureCountEl].forEach((el) => {
+    if (el) el.textContent = "0";
+  });
+}
+
+function renderDiffPanel(diff) {
+  if (!diffGroupsEl) return;
+  const matched = diff.matched || [];
+  const mismatched = diff.mismatched || [];
+  const onlyOurs = diff.only_ours || [];
+  const onlyAzure = diff.only_azure || [];
+
+  diffEmptyEl?.classList.add("hidden");
+  diffGroupsEl.classList.remove("hidden");
+
+  diffMatchedCountEl.textContent = String(matched.length);
+  diffMismatchCountEl.textContent = String(mismatched.length);
+  diffOursCountEl.textContent = String(onlyOurs.length);
+  diffAzureCountEl.textContent = String(onlyAzure.length);
+
+  diffMatchedListEl.innerHTML = "";
+  matched.forEach((pair, idx) => {
+    const li = document.createElement("li");
+    li.className = "diff-row diff-row-matched";
+    li.dataset.pairKey = `m-${idx}`;
+    li.textContent = pair.ours?.content || pair.azure?.content || "";
+    diffMatchedListEl.appendChild(li);
+  });
+
+  diffMismatchListEl.innerHTML = "";
+  mismatched.forEach((pair, idx) => {
+    const li = document.createElement("li");
+    li.className = "diff-row diff-row-mismatch";
+    li.dataset.pairKey = `x-${idx}`;
+    const ours = document.createElement("span");
+    ours.className = "diff-token diff-token-ours";
+    ours.textContent = pair.ours?.content || "";
+    const sep = document.createElement("span");
+    sep.className = "diff-sep";
+    sep.textContent = "↔";
+    const azure = document.createElement("span");
+    azure.className = "diff-token diff-token-azure";
+    azure.textContent = pair.azure?.content || "";
+    li.append(ours, sep, azure);
+    diffMismatchListEl.appendChild(li);
+  });
+
+  diffOursListEl.innerHTML = "";
+  onlyOurs.forEach((w, idx) => {
+    const li = document.createElement("li");
+    li.className = "diff-row diff-row-ours";
+    li.dataset.pairKey = `o-${idx}`;
+    li.textContent = w.content || "";
+    diffOursListEl.appendChild(li);
+  });
+
+  diffAzureListEl.innerHTML = "";
+  onlyAzure.forEach((w, idx) => {
+    const li = document.createElement("li");
+    li.className = "diff-row diff-row-azure";
+    li.dataset.pairKey = `a-${idx}`;
+    li.textContent = w.content || "";
+    diffAzureListEl.appendChild(li);
+  });
+
+  diffGroupsEl.querySelectorAll("li.diff-row").forEach((row) => {
+    row.addEventListener("mouseenter", () => highlightDiffPair(row.dataset.pairKey, true));
+    row.addEventListener("mouseleave", () => highlightDiffPair(row.dataset.pairKey, false));
+  });
+}
+
+function highlightDiffPair(pairKey, on) {
+  if (!pairKey) return;
+  previewLayoutOverlayEl
+    .querySelectorAll(`[data-pair-key="${pairKey}"]`)
+    .forEach((el) => el.classList.toggle("is-highlighted", !!on));
 }
 
 function renderLayoutVisualizations(visualizations) {
@@ -1657,17 +1761,15 @@ async function runOCR() {
     const showTableCsv = tableMatrices.length > 0;
     if (showStructured) {
       outputEl.textContent = "";
-      outputEl.classList.add("hidden");
-      rawWrapEl.classList.add("hidden");
       clearMarkdownPreview();
+      clearDiffPanel();
       clearResultViewSwitch();
       tablePreviewBodyEl.innerHTML = "";
       tablePreviewWrapEl.classList.add("hidden");
       lastTableMatrices = [];
     } else {
-      outputEl.classList.remove("hidden");
       outputEl.textContent = displayText;
-      rawWrapEl.classList.remove("hidden");
+      clearDiffPanel();
       renderMarkdownPreview(markdownPreview);
       renderTablePreview(tableMatrices);
       const layoutPages = normalizeLayoutPages(data.layout);
@@ -1689,7 +1791,6 @@ async function runOCR() {
       renderDiffOverlay(null);
       compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
       compareSummaryEl.classList.add("hidden");
-      compareTextDiffEl.classList.add("hidden");
       configurePlainResultViews({
         hasLayout:
           layoutPages.length > 0 ||
@@ -1953,7 +2054,7 @@ compareFormEl.addEventListener("submit", async (event) => {
 
   compareSummaryEl.textContent = "Vergleich läuft…";
   compareSummaryEl.classList.remove("hidden");
-  compareTextDiffEl.classList.add("hidden");
+  clearDiffPanel();
 
   const fd = new FormData();
   fd.append("file", file);
@@ -1972,20 +2073,24 @@ compareFormEl.addEventListener("submit", async (event) => {
     }
     const data = await resp.json();
     const diff = data.diff || {};
+    const matched = diff.matched || [];
+    const mismatched = diff.mismatched || [];
     const onlyOurs = diff.only_ours || [];
     const onlyAzure = diff.only_azure || [];
-    const matched = diff.matched_count || 0;
+
     renderDiffOverlay(diff);
+    renderDiffPanel(diff);
 
     compareSummaryEl.innerHTML =
-      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matched}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matched.length}</b></span> | ` +
+      `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatched.length}</b></span> | ` +
       `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOurs.length}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-missing">Nur Azure: <b>${onlyAzure.length}</b></span>`;
+      `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzure.length}</b></span>`;
     compareSummaryEl.classList.remove("hidden");
 
-    compareOurTextEl.textContent = data.our_text || "";
-    compareAzureTextEl.textContent = data.azure_text || "";
-    compareTextDiffEl.classList.remove("hidden");
+    if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
+      resultViewDiffBtnEl.click();
+    }
   } catch (err) {
     compareSummaryEl.textContent = `Netzwerkfehler: ${err.message}`;
   }

@@ -331,12 +331,15 @@ def _slice_line_rect(
 
 def _polygon_to_quad(
     polygon: list[float],
-) -> tuple[
-    tuple[float, float],
-    tuple[float, float],
-    tuple[float, float],
-    tuple[float, float],
-] | None:
+) -> (
+    tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ]
+    | None
+):
     """Parse a flat polygon into (TL, TR, BR, BL) corners.
 
     Uses diagonal sums/differences to sort points regardless of winding order,
@@ -535,8 +538,10 @@ def _build_line_and_word_entries(
             quad = _polygon_to_quad(region_polygon) if region_polygon else None
             if len(segments) == 1:
                 ref_width = (
-                    (quad[1][0] - quad[0][0]) ** 2 + (quad[1][1] - quad[0][1]) ** 2
-                ) ** 0.5 if quad else (region_rect[2] - region_rect[0] if region_rect else 0.0)
+                    ((quad[1][0] - quad[0][0]) ** 2 + (quad[1][1] - quad[0][1]) ** 2) ** 0.5
+                    if quad
+                    else (region_rect[2] - region_rect[0] if region_rect else 0.0)
+                )
                 chars_per_line = max(15, int(ref_width * 72 / 1000))
                 wrapped = _word_wrap_to_lines(segments[0], chars_per_line)
                 if len(wrapped) > 1:
@@ -549,11 +554,15 @@ def _build_line_and_word_entries(
                 if quad:
                     line_poly: list[float] = _word_polygon_in_quad(*quad, 0.0, 1.0, v0, v1)
                 else:
-                    line_rect = _slice_line_rect(region_rect, line_index=line_index, line_count=n_lines)
+                    line_rect = _slice_line_rect(
+                        region_rect, line_index=line_index, line_count=n_lines
+                    )
                     line_poly = (
                         _empty_polygon()
                         if line_rect is None
-                        else _rect_to_polygon(x1=line_rect[0], y1=line_rect[1], x2=line_rect[2], y2=line_rect[3])
+                        else _rect_to_polygon(
+                            x1=line_rect[0], y1=line_rect[1], x2=line_rect[2], y2=line_rect[3]
+                        )
                     )
                 line_span, search_cursor = _locate_span_in_page_content(
                     page_content=page_content,
@@ -873,13 +882,9 @@ def _build_tables(
                 "columnSpan": col_span,
                 "content": cell_content,
             }
-            polygon = _coerce_polygon(cell.get("polygon")) or _bbox_to_polygon(
-                cell.get("bbox_2d")
-            )
+            polygon = _coerce_polygon(cell.get("polygon")) or _bbox_to_polygon(cell.get("bbox_2d"))
             if polygon is not None:
-                azure_cell["boundingRegions"] = [
-                    {"pageNumber": page_number, "polygon": polygon}
-                ]
+                azure_cell["boundingRegions"] = [{"pageNumber": page_number, "polygon": polygon}]
             else:
                 azure_cell["boundingRegions"] = []
             azure_cells.append(azure_cell)
@@ -896,9 +901,7 @@ def _build_tables(
             region.get("bbox_2d")
         )
         if table_polygon is not None:
-            tables[-1]["boundingRegions"] = [
-                {"pageNumber": page_number, "polygon": table_polygon}
-            ]
+            tables[-1]["boundingRegions"] = [{"pageNumber": page_number, "polygon": table_polygon}]
     return tables
 
 
@@ -1510,48 +1513,131 @@ def _normalize_azure_words(pages: list[object]) -> list[dict[str, object]]:
         polygon = word.get("polygon", [])
         if isinstance(polygon, list) and len(polygon) >= 8:
             norm: list[float] = [
-                float(v) / (pw if i % 2 == 0 else ph) * 1000
-                for i, v in enumerate(polygon)
+                float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(polygon)
             ]
         else:
             norm = []
-        result.append({
-            "content": word.get("content", ""),
-            "polygon": norm,
-            "confidence": word.get("confidence", 0.0),
-        })
+        result.append(
+            {
+                "content": word.get("content", ""),
+                "polygon": norm,
+                "confidence": word.get("confidence", 0.0),
+            }
+        )
     return result
+
+
+_DIFF_PUNCT_RE = re.compile(r"[\s\u00a0\u200b\.,;:!?\"'`´‘’“”„‚()\[\]{}<>/\\|_*-]+")
+
+
+def _normalize_word_for_diff(text: object) -> str:
+    s = str(text or "").strip().lower()
+    s = _DIFF_PUNCT_RE.sub("", s)
+    return s
+
+
+def _bbox_centroid(b: tuple[float, float, float, float]) -> tuple[float, float]:
+    return (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0
+
+
+def _centroid_distance(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    (ax, ay), (bx, by) = _bbox_centroid(a), _bbox_centroid(b)
+    return float(((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5)
+
+
+def _safe_bbox(word: dict[str, object]) -> tuple[float, float, float, float] | None:
+    poly = word.get("polygon")
+    if not isinstance(poly, list) or len(poly) < 8:
+        return None
+    return _polygon_to_bbox(cast(list[float], poly))
 
 
 def _diff_word_polygons(
     ours: list[dict[str, object]],
     azure: list[dict[str, object]],
-    threshold: float = 0.3,
+    mismatch_max_distance: float = 120.0,
 ) -> dict[str, object]:
-    our_bboxes = [_polygon_to_bbox(w["polygon"]) for w in ours if len(w.get("polygon", [])) >= 8]  # type: ignore[arg-type]
-    az_bboxes = [_polygon_to_bbox(w["polygon"]) for w in azure if len(w.get("polygon", [])) >= 8]  # type: ignore[arg-type]
+    """Text-first word matcher.
 
-    our_matched: set[int] = set()
-    az_matched: set[int] = set()
+    1. Pair by normalized text. When multiple candidates share the same text, the
+       pair with the smallest bbox-centroid distance wins (synthetic word boxes
+       are unreliable for IoU, but centroids stay usable as a tiebreaker).
+    2. Of the leftovers, pair ours↔azure by centroid distance when they sit
+       close enough to plausibly be the same word read differently — these are
+       "mismatched" (OCR substitutions / misreads).
+    3. Anything still unmatched becomes only_ours / only_azure.
+    """
+    our_norm = [_normalize_word_for_diff(w.get("content")) for w in ours]
+    az_norm = [_normalize_word_for_diff(w.get("content")) for w in azure]
+    our_bbox = [_safe_bbox(w) for w in ours]
+    az_bbox = [_safe_bbox(w) for w in azure]
 
-    for ai, ab in enumerate(az_bboxes):
-        best_iou, best_oi = 0.0, -1
-        for oi, ob in enumerate(our_bboxes):
-            if oi in our_matched:
+    our_used: set[int] = set()
+    az_used: set[int] = set()
+    matched_pairs: list[dict[str, object]] = []
+
+    # Step 1: pair identical-text words. Greedy by centroid distance.
+    az_by_text: dict[str, list[int]] = {}
+    for ai, token in enumerate(az_norm):
+        if token:
+            az_by_text.setdefault(token, []).append(ai)
+
+    candidates: list[tuple[float, int, int]] = []
+    for oi, token in enumerate(our_norm):
+        if not token or token not in az_by_text:
+            continue
+        ob = our_bbox[oi]
+        for ai in az_by_text[token]:
+            ab = az_bbox[ai]
+            if ob is None or ab is None:
+                dist = 0.0
+            else:
+                dist = _centroid_distance(ob, ab)
+            candidates.append((dist, oi, ai))
+    candidates.sort(key=lambda t: t[0])
+    for _dist, oi, ai in candidates:
+        if oi in our_used or ai in az_used:
+            continue
+        our_used.add(oi)
+        az_used.add(ai)
+        matched_pairs.append({"ours": ours[oi], "azure": azure[ai]})
+
+    # Step 2: pair remaining words by position to surface OCR substitutions.
+    remaining_our = [oi for oi in range(len(ours)) if oi not in our_used]
+    remaining_az = [ai for ai in range(len(azure)) if ai not in az_used]
+    pair_candidates: list[tuple[float, int, int]] = []
+    for oi in remaining_our:
+        ob = our_bbox[oi]
+        if ob is None:
+            continue
+        for ai in remaining_az:
+            ab = az_bbox[ai]
+            if ab is None:
                 continue
-            iou = _iou_bbox(ab, ob)
-            if iou > best_iou:
-                best_iou, best_oi = iou, oi
-        if best_iou >= threshold and best_oi >= 0:
-            az_matched.add(ai)
-            our_matched.add(best_oi)
+            dist = _centroid_distance(ob, ab)
+            if dist <= mismatch_max_distance:
+                pair_candidates.append((dist, oi, ai))
+    pair_candidates.sort(key=lambda t: t[0])
+    mismatched_pairs: list[dict[str, object]] = []
+    for _dist, oi, ai in pair_candidates:
+        if oi in our_used or ai in az_used:
+            continue
+        our_used.add(oi)
+        az_used.add(ai)
+        mismatched_pairs.append({"ours": ours[oi], "azure": azure[ai]})
+
+    only_ours = [ours[oi] for oi in range(len(ours)) if oi not in our_used]
+    only_azure = [azure[ai] for ai in range(len(azure)) if ai not in az_used]
 
     return {
-        "only_ours": [ours[i] for i in range(len(ours)) if i not in our_matched],
-        "only_azure": [azure[i] for i in range(len(azure)) if i not in az_matched],
-        "matched_ours": [ours[i] for i in sorted(our_matched)],
-        "matched_azure": [azure[i] for i in sorted(az_matched)],
-        "matched_count": len(our_matched),
+        "matched": matched_pairs,
+        "mismatched": mismatched_pairs,
+        "only_ours": only_ours,
+        "only_azure": only_azure,
+        "matched_count": len(matched_pairs),
+        "mismatched_count": len(mismatched_pairs),
     }
 
 
@@ -1613,13 +1699,17 @@ async def compare_with_azure(
         content_type = _resolve_effective_content_type(file.content_type, image_bytes)
     else:
         image_bytes = await request.body()
-        content_type = _resolve_effective_content_type(request.headers.get("content-type"), image_bytes)
+        content_type = _resolve_effective_content_type(
+            request.headers.get("content-type"), image_bytes
+        )
     image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")
     if len(image_bytes) > settings.max_upload_bytes:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß.")
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß."
+        )
 
     try:
         our_task = pipeline.run(
@@ -1637,14 +1727,19 @@ async def compare_with_azure(
             expert_layout_threshold=expert_layout_threshold,
         )
         azure_task = _call_azure_read(
-            azure_endpoint, azure_key, image_bytes, content_type,
+            azure_endpoint,
+            azure_key,
+            image_bytes,
+            content_type,
             verify_ssl=settings.verify_ssl,
         )
         (our_result, _), azure_response = await asyncio.gather(our_task, azure_task)
     except (ValueError, TimeoutError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Azure-Fehler: {exc}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Azure-Fehler: {exc}"
+        ) from exc
 
     our_analyze = _build_analyze_result(
         content=our_result.text,

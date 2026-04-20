@@ -301,13 +301,13 @@
             Markdown
           </button>
           <button
-            id="result-view-raw-btn"
+            id="result-view-diff-btn"
             class="result-view-btn"
             type="button"
-            data-result-view="raw"
+            data-result-view="diff"
             aria-pressed="false"
           >
-            Rohtext
+            Vergleich
           </button>
         </div>
         <section id="layout-wrap" class="hidden">
@@ -323,14 +323,51 @@
           <h3>Markdown-Vorschau</h3>
           <div id="markdown-preview" class="markdown-preview"></div>
         </section>
-        <section id="raw-wrap" class="hidden">
-          <h3>Rohtext</h3>
-          <pre id="output"></pre>
-          <section id="table-preview-wrap" class="hidden">
-            <h3>Tabellenvorschau</h3>
-            <div id="table-preview-body"></div>
-          </section>
+        <section id="diff-wrap" class="hidden">
+          <div class="diff-head">
+            <h3>Vergleich mit Azure</h3>
+            <p id="diff-empty" class="diff-empty">Zuerst unten einen Azure-Endpunkt eintragen und Vergleichen klicken.</p>
+          </div>
+          <div id="diff-groups" class="diff-groups hidden">
+            <details class="diff-group" open>
+              <summary>
+                <span class="diff-legend-dot diff-legend-matched" aria-hidden="true"></span>
+                Übereinstimmung
+                <span class="diff-group-count" id="diff-matched-count">0</span>
+              </summary>
+              <ul id="diff-matched-list" class="diff-list"></ul>
+            </details>
+            <details class="diff-group" open>
+              <summary>
+                <span class="diff-legend-dot diff-legend-mismatch" aria-hidden="true"></span>
+                Abweichung (gleicher Ort, anderer Text)
+                <span class="diff-group-count" id="diff-mismatch-count">0</span>
+              </summary>
+              <ul id="diff-mismatch-list" class="diff-list diff-list-pairs"></ul>
+            </details>
+            <details class="diff-group">
+              <summary>
+                <span class="diff-legend-dot diff-legend-ours" aria-hidden="true"></span>
+                Nur wir
+                <span class="diff-group-count" id="diff-ours-count">0</span>
+              </summary>
+              <ul id="diff-ours-list" class="diff-list"></ul>
+            </details>
+            <details class="diff-group">
+              <summary>
+                <span class="diff-legend-dot diff-legend-azure" aria-hidden="true"></span>
+                Nur Azure
+                <span class="diff-group-count" id="diff-azure-count">0</span>
+              </summary>
+              <ul id="diff-azure-list" class="diff-list"></ul>
+            </details>
+          </div>
         </section>
+        <section id="table-preview-wrap" class="hidden">
+          <h3>Tabellenvorschau</h3>
+          <div id="table-preview-body"></div>
+        </section>
+        <pre id="output" class="visually-hidden" aria-hidden="true"></pre>
         <section id="structured-wrap" class="hidden">
           <h3>Strukturierte Nutzdaten</h3>
           <pre id="json-output"></pre>
@@ -343,16 +380,11 @@
             <button type="submit" class="action-btn">Vergleichen</button>
           </form>
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
-          <div id="compare-text-diff" class="compare-text-diff hidden">
-            <div class="compare-text-panel">
-              <h4>Unser OCR</h4>
-              <pre id="compare-our-text"></pre>
-            </div>
-            <div class="compare-text-panel">
-              <h4>Azure OCR</h4>
-              <pre id="compare-azure-text"></pre>
-            </div>
-          </div>
+          <p class="compare-hint">
+            Details zu übereinstimmenden und abweichenden Wörtern erscheinen im Tab
+            „Vergleich“. Abweichungen zeigen beide Lesungen nebeneinander – die
+            Entscheidung, welche korrekt ist, liegt bei dir.
+          </p>
         </section>
         <div id="loading-overlay" class="loading-overlay" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
