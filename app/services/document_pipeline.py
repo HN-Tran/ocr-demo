@@ -227,7 +227,7 @@ def _match_to_source_text(
             best_start = i
 
     if best_start_score < threshold:
-        return ""
+        return candidate
 
     # Sequential alignment: advance through source text one candidate line at a time.
     # For each candidate line, try joining 1..max_join consecutive source text lines
@@ -507,6 +507,8 @@ class DocumentPipeline:
         timeout_s: float,
         enable_table_transformer: bool = False,
         enable_per_region_ocr: bool = True,
+        enable_text_anchor: bool = True,
+        text_anchor_threshold: float = 60.0,
         word_detector: WordDetector | None = None,
     ) -> None:
         self.direct_pipeline = direct_pipeline
@@ -517,6 +519,8 @@ class DocumentPipeline:
         self.timeout_s = timeout_s
         self.enable_table_transformer = enable_table_transformer
         self.enable_per_region_ocr = enable_per_region_ocr
+        self.enable_text_anchor = enable_text_anchor
+        self.text_anchor_threshold = text_anchor_threshold
         self.word_detector: WordDetector | None = word_detector
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
@@ -553,8 +557,9 @@ class DocumentPipeline:
 
     def _get_table_recognizer(self) -> TableStructureRecognizer:
         if self._table_recognizer is None:
-            self._table_recognizer = TableStructureRecognizer()
-            self._table_recognizer.start()
+            recognizer = TableStructureRecognizer()
+            recognizer.start()
+            self._table_recognizer = recognizer
         return self._table_recognizer
 
     # ------------------------------------------------------------------
@@ -622,6 +627,8 @@ class DocumentPipeline:
         page_number: int,
         use_table_transformer: bool = False,
         per_region_ocr: bool = True,
+        text_anchor: bool = True,
+        text_anchor_threshold: float = 60.0,
     ) -> tuple[dict[str, object], str, list[str]]:
         """Full-page OCR + layout detection, return (page_layout, page_text, warnings)."""
         warnings: list[str] = []
@@ -667,9 +674,14 @@ class DocumentPipeline:
                 except OllamaError as exc:
                     warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
                     candidate = ""
-                layout_region["content"] = (
-                    _match_to_source_text(candidate, page_text) if candidate else ""
-                )
+                if not candidate:
+                    layout_region["content"] = ""
+                elif text_anchor:
+                    layout_region["content"] = _match_to_source_text(
+                        candidate, page_text, threshold=text_anchor_threshold
+                    )
+                else:
+                    layout_region["content"] = candidate
 
                 # Table Transformer: detect precise cell bboxes for table regions.
                 if task_type == "table" and use_table_transformer:
@@ -716,6 +728,8 @@ class DocumentPipeline:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_per_region_ocr: bool | None = None,
+        expert_text_anchor: bool | None = None,
+        expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
     ) -> OCRResult:
         selected_model = (model or "").strip() or self.default_model
@@ -733,6 +747,14 @@ class DocumentPipeline:
             self.enable_per_region_ocr
             if expert_per_region_ocr is None
             else expert_per_region_ocr
+        )
+        selected_text_anchor = (
+            self.enable_text_anchor if expert_text_anchor is None else expert_text_anchor
+        )
+        selected_text_anchor_threshold = (
+            self.text_anchor_threshold
+            if expert_text_anchor_threshold is None
+            else expert_text_anchor_threshold
         )
         selected_word_detector: WordDetector | None = self.word_detector
         word_detector_warning: str | None = None
@@ -820,6 +842,8 @@ class DocumentPipeline:
                 page_number=page_number,
                 use_table_transformer=selected_table_transformer,
                 per_region_ocr=selected_per_region_ocr,
+                text_anchor=selected_text_anchor,
+                text_anchor_threshold=selected_text_anchor_threshold,
             )
             if selected_word_detector is not None:
                 try:

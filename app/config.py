@@ -47,6 +47,8 @@ class Settings:
     ocr_expert_layout_model: str
     ocr_expert_table_transformer: bool
     ocr_expert_per_region_ocr: bool
+    ocr_expert_text_anchor: bool
+    ocr_expert_text_anchor_threshold: float
     ocr_word_detector: str
     default_token_limit: int
     request_timeout_s: float
@@ -85,7 +87,9 @@ def get_settings() -> Settings:
         ),
         ocr_expert_table_transformer=_env_bool("OCR_EXPERT_TABLE_TRANSFORMER", False),
         ocr_expert_per_region_ocr=_env_bool("OCR_EXPERT_PER_REGION_OCR", True),
-        ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "none").strip().lower(),
+        ocr_expert_text_anchor=_env_bool("OCR_EXPERT_TEXT_ANCHOR", True),
+        ocr_expert_text_anchor_threshold=_env_float("OCR_EXPERT_TEXT_ANCHOR_THRESHOLD", 60.0),
+        ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "doctr").strip().lower(),
         default_token_limit=default_token_limit,
         verify_ssl=_env_bool("VERIFY_SSL", False),
         request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 120.0),

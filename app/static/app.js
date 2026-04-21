@@ -1304,6 +1304,20 @@ function buildPayload() {
   } else {
     payload.delete("expert_layout_threshold");
   }
+  const expertTextAnchorValue = String(payload.get("expert_text_anchor") || "").trim();
+  if (expertTextAnchorValue === "true" || expertTextAnchorValue === "false") {
+    payload.set("expert_text_anchor", expertTextAnchorValue);
+  } else {
+    payload.delete("expert_text_anchor");
+  }
+  const expertTextAnchorThresholdValue = String(
+    payload.get("expert_text_anchor_threshold") || "",
+  ).trim();
+  if (expertTextAnchorThresholdValue) {
+    payload.set("expert_text_anchor_threshold", expertTextAnchorThresholdValue);
+  } else {
+    payload.delete("expert_text_anchor_threshold");
+  }
   if (!payload.get("model")) {
     payload.delete("model");
   }
@@ -2123,10 +2137,41 @@ compareFormEl.addEventListener("submit", async (event) => {
   fd.append("file", file);
   fd.append("azure_endpoint", endpoint);
   fd.append("azure_key", key);
-  if (lastResponse?.analyzeResult?.pages?.[0]) {
+
+  const appendIfSet = (name, rawValue, { bool = false } = {}) => {
+    const value = String(rawValue ?? "").trim();
+    if (!value) return;
+    if (bool && value !== "true" && value !== "false") return;
+    fd.append(name, value);
+  };
+  appendIfSet("backend", document.getElementById("backend")?.value);
+  appendIfSet("expert_enable_layout", document.getElementById("expert_enable_layout")?.value, {
+    bool: true,
+  });
+  appendIfSet("expert_layout_model", document.getElementById("expert_layout_model")?.value);
+  appendIfSet(
+    "expert_layout_threshold",
+    document.getElementById("expert_layout_threshold")?.value,
+  );
+  appendIfSet("expert_table_transformer", document.getElementById("expert_table_transformer")?.value, {
+    bool: true,
+  });
+  appendIfSet("expert_per_region_ocr", document.getElementById("expert_per_region_ocr")?.value, {
+    bool: true,
+  });
+  appendIfSet("expert_text_anchor", document.getElementById("expert_text_anchor")?.value, {
+    bool: true,
+  });
+  appendIfSet(
+    "expert_text_anchor_threshold",
+    document.getElementById("expert_text_anchor_threshold")?.value,
+  );
+  appendIfSet("expert_word_detector", document.getElementById("expert_word_detector")?.value);
+  if (!fd.has("expert_enable_layout") && lastResponse?.analyzeResult?.pages?.[0]) {
     fd.append("expert_enable_layout", "true");
   }
 
+  setLoading(true);
   try {
     const resp = await fetch(compareEndpoint, { method: "POST", body: fd });
     if (!resp.ok) {
@@ -2156,6 +2201,8 @@ compareFormEl.addEventListener("submit", async (event) => {
     }
   } catch (err) {
     compareSummaryEl.textContent = `Netzwerkfehler: ${err.message}`;
+  } finally {
+    setLoading(false);
   }
 });
 

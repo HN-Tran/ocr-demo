@@ -238,15 +238,15 @@ uv add --dev <package>
 
 ## Wort-Polygon-Detektor (optional)
 
-Der Layout-Viewer kann wortgenaue Bounding-Polygone anzeigen. Dafür muss ein optionales Backend installiert und über `OCR_WORD_DETECTOR` aktiviert werden.
+Der Layout-Viewer kann wortgenaue Bounding-Polygone anzeigen. Dafür wird `OCR_WORD_DETECTOR` gesetzt (Standard: `doctr`).
 
 | Backend | Env-Wert | Installation |
 |---|---|---|
-| Kein Detektor (Standard) | `none` | — |
+| Kein Detektor | `none` | — |
+| DocTR (Standard) | `doctr` | in den Haupt-Dependencies enthalten |
 | PaddleOCR | `paddleocr` | `pip install ".[paddle]"` bzw. Docker-Extra `paddle` |
-| DocTR | `doctr` | `pip install ".[doctr]"` bzw. Docker-Extra `doctr` |
 
-Im Docker-Image sind beide Extras bereits enthalten (`pip install ".[paddle,doctr]"`).
+Im Docker-Image ist zusätzlich das `paddle`-Extra enthalten (`pip install ".[paddle]"`).
 
 Hinweise:
 - PaddleOCR erfordert Python 3.12 (keine Wheels für 3.13).

@@ -38,6 +38,8 @@ class OCRBackendRouter:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_per_region_ocr: bool | None = None,
+        expert_text_anchor: bool | None = None,
+        expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
     ) -> tuple[OCRResult, str]:
         requested_backend = (
@@ -63,6 +65,8 @@ class OCRBackendRouter:
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
             expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
         )
         return result, requested_backend

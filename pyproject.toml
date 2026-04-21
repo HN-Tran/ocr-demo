@@ -20,17 +20,18 @@ dependencies = [
   "opencv-python-headless>=4.10.0,<5.0.0",
   "pillow>=12.1.0,<13.0.0",
   "pypdfium2>=5.6.0",
+  "python-doctr>=0.10.0",
   "python-multipart>=0.0.9,<1.0.0",
   "rapidfuzz>=3.14.3",
   "sentencepiece>=0.2.0,<1.0.0",
   "timm>=1.0.25",
+  "torch>=2.0.0",
   "transformers>=5.3.0,<6.0.0",
   "uvicorn>=0.30.0,<1.0.0",
 ]
 
 [project.optional-dependencies]
 paddle = ["paddlepaddle>=2.6.0", "paddleocr>=3.0.0"]
-doctr = ["python-doctr>=0.10.0", "torch>=2.0.0"]
 
 [dependency-groups]
 dev = [

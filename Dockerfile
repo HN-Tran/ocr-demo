@@ -30,7 +30,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
         --index-url ${PYTORCH_CPU_INDEX_URL} \
         --extra-index-url https://pypi.org/simple \
         torch torchvision && \
-    python -m pip install --no-cache-dir ".[paddle,doctr]"
+    python -m pip install --no-cache-dir ".[paddle]"
 
 RUN useradd -r -u 101 -m appuser && \
     mkdir -p /home/appuser/.cache && \

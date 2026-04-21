@@ -1159,6 +1159,8 @@ async def _run_plain_ocr(
     expert_layout_threshold: float | None = None,
     expert_table_transformer: bool | None = None,
     expert_per_region_ocr: bool | None = None,
+    expert_text_anchor: bool | None = None,
+    expert_text_anchor_threshold: float | None = None,
     expert_word_detector: str | None = None,
 ) -> tuple[object, str]:
     try:
@@ -1177,6 +1179,9 @@ async def _run_plain_ocr(
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
         )
     except ValueError as exc:
@@ -1205,6 +1210,8 @@ async def _execute_compat_analyze_operation(
     expert_layout_threshold: float | None = None,
     expert_table_transformer: bool | None = None,
     expert_per_region_ocr: bool | None = None,
+    expert_text_anchor: bool | None = None,
+    expert_text_anchor_threshold: float | None = None,
     expert_word_detector: str | None = None,
 ) -> None:
     try:
@@ -1219,6 +1226,8 @@ async def _execute_compat_analyze_operation(
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
             expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
         )
         completed_at = datetime.now(timezone.utc)
@@ -1356,6 +1365,8 @@ async def ocr(
     expert_layout_threshold: float | None = Form(None),
     expert_table_transformer: bool | None = Form(None),
     expert_per_region_ocr: bool | None = Form(None),
+    expert_text_anchor: bool | None = Form(None),
+    expert_text_anchor_threshold: float | None = Form(None),
     expert_word_detector: str | None = Form(None),
     backend: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
@@ -1396,6 +1407,16 @@ async def ocr(
         expert_per_region_ocr,
         _query_param(request, "expert_per_region_ocr"),
         "expert_per_region_ocr",
+    )
+    expert_text_anchor = _resolve_bool_param(
+        expert_text_anchor,
+        _query_param(request, "expert_text_anchor"),
+        "expert_text_anchor",
+    )
+    expert_text_anchor_threshold = _resolve_float_param(
+        expert_text_anchor_threshold,
+        _query_param(request, "expert_text_anchor_threshold"),
+        "expert_text_anchor_threshold",
     )
     expert_word_detector = _resolve_text_param(
         expert_word_detector, _query_param(request, "expert_word_detector"), None
@@ -1440,6 +1461,8 @@ async def ocr(
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
             expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
         )
     except ValueError as exc:
@@ -1702,7 +1725,13 @@ async def compare_with_azure(
     azure_key: str = Form(default=""),
     backend: str | None = Form(None),
     expert_enable_layout: bool | None = Form(None),
+    expert_layout_model: str | None = Form(None),
     expert_layout_threshold: float | None = Form(None),
+    expert_table_transformer: bool | None = Form(None),
+    expert_per_region_ocr: bool | None = Form(None),
+    expert_text_anchor: bool | None = Form(None),
+    expert_text_anchor_threshold: float | None = Form(None),
+    expert_word_detector: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
@@ -1736,7 +1765,13 @@ async def compare_with_azure(
             token_limit=None,
             gif_max_frames=None,
             expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
+            expert_word_detector=expert_word_detector,
         )
     )
     azure_task = asyncio.create_task(
@@ -1872,6 +1907,8 @@ async def compat_sync_analyze(
     expert_layout_threshold: float | None = Query(None),
     expert_table_transformer: bool | None = Query(None),
     expert_per_region_ocr: bool | None = Query(None),
+    expert_text_anchor: bool | None = Query(None),
+    expert_text_anchor_threshold: float | None = Query(None),
     expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
@@ -1893,6 +1930,8 @@ async def compat_sync_analyze(
         expert_layout_threshold=expert_layout_threshold,
         expert_table_transformer=expert_table_transformer,
         expert_per_region_ocr=expert_per_region_ocr,
+        expert_text_anchor=expert_text_anchor,
+        expert_text_anchor_threshold=expert_text_anchor_threshold,
         expert_word_detector=expert_word_detector,
     )
     completed_at = datetime.now(timezone.utc)
@@ -1923,6 +1962,8 @@ async def compat_analyze(
     expert_layout_threshold: float | None = Query(None),
     expert_table_transformer: bool | None = Query(None),
     expert_per_region_ocr: bool | None = Query(None),
+    expert_text_anchor: bool | None = Query(None),
+    expert_text_anchor_threshold: float | None = Query(None),
     expert_word_detector: str | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
@@ -1954,6 +1995,8 @@ async def compat_analyze(
             expert_layout_threshold=expert_layout_threshold,
             expert_table_transformer=expert_table_transformer,
             expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
         )
     )

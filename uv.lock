@@ -1384,19 +1384,17 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "pypdfium2" },
+    { name = "python-doctr" },
     { name = "python-multipart" },
     { name = "rapidfuzz" },
     { name = "sentencepiece" },
     { name = "timm" },
+    { name = "torch" },
     { name = "transformers" },
     { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
-doctr = [
-    { name = "python-doctr" },
-    { name = "torch" },
-]
 paddle = [
     { name = "paddleocr" },
     { name = "paddlepaddle" },
@@ -1420,16 +1418,16 @@ requires-dist = [
     { name = "paddlepaddle", marker = "extra == 'paddle'", specifier = ">=2.6.0" },
     { name = "pillow", specifier = ">=12.1.0,<13.0.0" },
     { name = "pypdfium2", specifier = ">=5.6.0" },
-    { name = "python-doctr", marker = "extra == 'doctr'", specifier = ">=0.10.0" },
+    { name = "python-doctr", specifier = ">=0.10.0" },
     { name = "python-multipart", specifier = ">=0.0.9,<1.0.0" },
     { name = "rapidfuzz", specifier = ">=3.14.3" },
     { name = "sentencepiece", specifier = ">=0.2.0,<1.0.0" },
     { name = "timm", specifier = ">=1.0.25" },
-    { name = "torch", marker = "extra == 'doctr'", specifier = ">=2.0.0" },
+    { name = "torch", specifier = ">=2.0.0" },
     { name = "transformers", specifier = ">=5.3.0,<6.0.0" },
     { name = "uvicorn", specifier = ">=0.30.0,<1.0.0" },
 ]
-provides-extras = ["paddle", "doctr"]
+provides-extras = ["paddle"]
 
 [package.metadata.requires-dev]
 dev = [

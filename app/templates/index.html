@@ -218,6 +218,40 @@
             </label>
 
             <label>
+              Dev: Text-Anker
+              <select id="expert_text_anchor" name="expert_text_anchor">
+                <option value="" selected>
+                  Standard ({{ "An" if default_expert_text_anchor else "Aus" }})
+                </option>
+                <option value="true">An</option>
+                <option value="false">Aus</option>
+              </select>
+              <span class="hint">
+                Gleicht die per-Region-OCR mit der Seiten-OCR ab (Fuzzy-Match).
+                Aus: Region-Texte werden roh übernommen &mdash; hilfreich bei
+                Tabellen, bei denen der Abgleich fehlschlägt.
+              </span>
+            </label>
+
+            <label>
+              Dev: Text-Anker-Schwelle
+              <input
+                id="expert_text_anchor_threshold"
+                name="expert_text_anchor_threshold"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                placeholder="{{ default_expert_text_anchor_threshold }}"
+              />
+              <span class="hint">
+                Mindest-Fuzzy-Score (0-100), ab dem der Anker übernommen wird.
+                Darunter: Rohtext der Region wird verwendet. Standard:
+                {{ default_expert_text_anchor_threshold }}.
+              </span>
+            </label>
+
+            <label>
               Dev: Wort-Erkennung
               <select id="expert_word_detector" name="expert_word_detector">
                 <option value="" selected>
