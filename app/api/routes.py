@@ -1825,10 +1825,17 @@ async def compare_with_azure(
     )
     our_pages_raw = our_analyze.get("pages")
     our_pages = our_pages_raw if isinstance(our_pages_raw, list) else []
+    our_layout_pages = our_result.layout or []
     our_words_per_page: list[list[dict[str, object]]] = []
-    for page in our_pages:
+    for i, page in enumerate(our_pages):
+        # Prefer detector-provided word polygons (DocTR / PaddleOCR) over the
+        # words synthesized from layout regions in _build_line_and_word_entries.
+        page_layout = our_layout_pages[i] if i < len(our_layout_pages) else None
+        detector_polys = page_layout.get("word_polys") if isinstance(page_layout, dict) else None
         words: list[dict[str, object]] = []
-        if isinstance(page, dict):
+        if isinstance(detector_polys, list) and detector_polys:
+            words = [wp for wp in detector_polys if isinstance(wp, dict)]
+        elif isinstance(page, dict):
             w = page.get("words")
             if isinstance(w, list):
                 words = cast(list[dict[str, object]], w)
