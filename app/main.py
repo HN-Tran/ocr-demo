@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import cast
@@ -9,13 +10,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.api.routes import compat_router, router
+from app.api.routes import compat_router, router, warm_example
 from app.config import Settings, get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.document_pipeline import DocumentPipeline
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
+from app.services.warmed_example_store import WarmedExampleStore
 from app.services.word_detector import WordDetector, create_word_detector
 
 logger = logging.getLogger("ocr-demo")
@@ -90,6 +92,52 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     app.state.analyze_operation_store = AnalyzeOperationStore(
         storage_dir=settings.analyze_store_dir
     )
+    app.state.warmed_example_store = WarmedExampleStore()
+
+    @app.on_event("startup")
+    async def _warm_examples_on_startup() -> None:
+        if not settings.examples:
+            return
+        store: WarmedExampleStore = app.state.warmed_example_store
+
+        async def _warm_one(slot: int, label: str, path_str: str) -> None:
+            file_path = Path(path_str)
+            if not file_path.is_file():
+                logger.warning(
+                    "Beispiel %d (%s): Datei %s nicht gefunden — Warm-Up übersprungen.",
+                    slot,
+                    label,
+                    file_path,
+                )
+                return
+            try:
+                entry = await warm_example(
+                    slot=slot,
+                    label=label,
+                    file_path=file_path,
+                    pipeline=ocr_backend_router,
+                    azure_endpoint=settings.azure_preset_endpoint,
+                    azure_key=settings.azure_preset_key,
+                    verify_ssl=settings.verify_ssl,
+                    include_detector_only=settings.ocr_expert_compare_include_detector_only,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Beispiel %d (%s) konnte nicht vorgewärmt werden: %s", slot, label, exc
+                )
+                return
+            await store.store(entry)
+            logger.info(
+                "Beispiel %d (%s) vorgewärmt (compare=%s).",
+                slot,
+                label,
+                "ja" if entry.compare_response else "nein",
+            )
+
+        # Run all warmups in the background; don't block the event loop on
+        # them. The cached endpoint returns 404 until each task completes.
+        for idx, (label, path_str) in enumerate(settings.examples, start=1):
+            asyncio.create_task(_warm_one(idx, label, path_str))
 
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
@@ -126,6 +174,15 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_expert_text_anchor": settings.ocr_expert_text_anchor,
                 "default_expert_text_anchor_threshold": settings.ocr_expert_text_anchor_threshold,
                 "default_expert_word_detector": settings.ocr_word_detector,
+                "default_expert_compare_include_detector_only": (
+                    settings.ocr_expert_compare_include_detector_only
+                ),
+                "azure_preset_label": settings.azure_preset_label,
+                "azure_preset_endpoint": settings.azure_preset_endpoint,
+                "examples": [
+                    {"slot": idx + 1, "label": label}
+                    for idx, (label, _path) in enumerate(settings.examples)
+                ],
                 "static_version": version,
                 "app_base_path": app_base_path,
             },

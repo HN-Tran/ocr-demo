@@ -25,7 +25,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from rapidfuzz import fuzz
 
 from app.config import get_settings
@@ -33,6 +33,7 @@ from app.schemas import SCHEMA_REGISTRY
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
 router = APIRouter(prefix="/api")
 compat_router = APIRouter()
@@ -1350,6 +1351,43 @@ async def schemas() -> dict:
     return {"schemas": SCHEMA_REGISTRY}
 
 
+@router.get("/examples/{slot}")
+async def get_example_file(slot: int) -> FileResponse:
+    settings = get_settings()
+    examples = settings.examples
+    if slot < 1 or slot > len(examples):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Beispiel {slot} ist nicht konfiguriert.",
+        )
+    _label, raw_path = examples[slot - 1]
+    file_path = Path(raw_path)
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Beispieldatei für Slot {slot} wurde nicht gefunden.",
+        )
+    return FileResponse(file_path, filename=file_path.name)
+
+
+@router.get("/examples/{slot}/cached")
+async def get_example_cached(slot: int, request: Request) -> dict[str, object]:
+    store = cast(WarmedExampleStore, request.app.state.warmed_example_store)
+    entry = await store.get(slot)
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Beispiel {slot} ist nicht (noch nicht) vorgewärmt.",
+        )
+    return {
+        "slot": entry.slot,
+        "label": entry.label,
+        "filename": entry.filename,
+        "ocr_response": entry.ocr_response,
+        "compare_response": entry.compare_response,
+    }
+
+
 @router.post("/ocr")
 async def ocr(
     request: Request,
@@ -1481,33 +1519,46 @@ async def ocr(
         ) from exc
 
     completed_at = datetime.now(timezone.utc)
-    content = result.text
+    return _build_ocr_response(
+        result=result,
+        selected_backend=selected_backend,
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+
+
+def _build_ocr_response(
+    *,
+    result: object,
+    selected_backend: str,
+    started_at: datetime,
+    completed_at: datetime,
+) -> dict[str, object]:
     analyze_result = _build_analyze_result(
-        content=content,
-        model_id=result.model,
-        layout=result.layout,
+        content=getattr(result, "text", "") or "",
+        model_id=getattr(result, "model", "") or "",
+        layout=getattr(result, "layout", None),
         page_infos=getattr(result, "page_infos", None),
         page_texts=getattr(result, "page_texts", None),
     )
-
     return {
         "status": "succeeded",
         "createdDateTime": _isoformat_utc(started_at),
         "lastUpdatedDateTime": _isoformat_utc(completed_at),
         "analyzeResult": analyze_result,
-        "text": result.text,
-        "markdown": result.markdown,
-        "structured": result.structured,
-        "layout": result.layout,
+        "text": getattr(result, "text", ""),
+        "markdown": getattr(result, "markdown", None),
+        "structured": getattr(result, "structured", None),
+        "layout": getattr(result, "layout", None),
         "tables": analyze_result.get("tables", []),
-        "layout_visualizations": result.layout_visualizations,
-        "page_images": result.page_images,
-        "model": result.model,
-        "mode": result.mode,
-        "schema_name": result.schema_name,
+        "layout_visualizations": getattr(result, "layout_visualizations", None),
+        "page_images": getattr(result, "page_images", None),
+        "model": getattr(result, "model", ""),
+        "mode": getattr(result, "mode", ""),
+        "schema_name": getattr(result, "schema_name", None),
         "backend": selected_backend,
-        "latency_ms": result.latency_ms,
-        "warnings": result.warnings,
+        "latency_ms": getattr(result, "latency_ms", 0),
+        "warnings": getattr(result, "warnings", []),
     }
 
 
@@ -1721,9 +1772,73 @@ async def _call_azure_read(
 _OURS_POLYGON_MATCH_THRESHOLD = 70.0
 
 
+async def warm_example(
+    *,
+    slot: int,
+    label: str,
+    file_path: Path,
+    pipeline: OCRBackendRouter,
+    azure_endpoint: str,
+    azure_key: str,
+    verify_ssl: bool,
+    include_detector_only: bool,
+) -> WarmedExample:
+    """Pre-compute OCR (and optionally compare) for an example file.
+
+    Run from a startup background task. Raises on failure so the caller
+    can decide whether to retry or just log and skip.
+    """
+    image_bytes = file_path.read_bytes()
+    content_type = _resolve_effective_content_type(None, image_bytes)
+    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+
+    started_at = datetime.now(timezone.utc)
+    result, selected_backend = await pipeline.run(
+        backend=None,
+        image_bytes=image_bytes,
+        content_type=content_type,
+        mode="plain",
+        schema_name=None,
+        model=None,
+        task="ocr_text",
+        custom_prompt=None,
+        token_limit=None,
+        gif_max_frames=None,
+    )
+    completed_at = datetime.now(timezone.utc)
+    ocr_response = _build_ocr_response(
+        result=result,
+        selected_backend=selected_backend,
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+
+    compare_response: dict[str, object] | None = None
+    if azure_endpoint:
+        compare_response = await _execute_compare_against_azure(
+            image_bytes=image_bytes,
+            content_type=content_type,
+            azure_endpoint=azure_endpoint,
+            azure_key=azure_key,
+            pipeline=pipeline,
+            verify_ssl=verify_ssl,
+            include_detector_only=include_detector_only,
+        )
+
+    return WarmedExample(
+        slot=slot,
+        label=label,
+        filename=file_path.name,
+        ocr_response=ocr_response,
+        compare_response=compare_response,
+    )
+
+
 def _build_ours_words_from_page_text(
     page_text: str,
     word_polys: list[dict[str, object]],
+    *,
+    include_detector_only: bool = False,
 ) -> list[dict[str, object]]:
     """Tokenize the page-level OCR text and attach detector polygons by text match.
 
@@ -1734,9 +1849,11 @@ def _build_ours_words_from_page_text(
     diff text-only — so words Ollama caught but DocTR didn't box (punctuation,
     over-merged tokens) aren't dropped from the comparison.
 
-    Word polys whose content doesn't match any page-level token are still
-    included as a safety net (rare case where DocTR caught something Ollama
-    missed at the page level).
+    When ``include_detector_only`` is True, word polys whose content didn't
+    match any page-level token are appended as a safety net for the rare case
+    where DocTR caught something Ollama missed at the page level. Off by
+    default because DocTR's spurious / split / partially-recognised boxes
+    otherwise appear as bogus tokens in the diff.
     """
     tokens = [m.group(0) for m in _WORD_RE.finditer(page_text or "")]
 
@@ -1773,56 +1890,49 @@ def _build_ours_words_from_page_text(
         else:
             words.append({"content": token, "polygon": [], "confidence": 1.0})
 
-    # Safety net: include detector-only words that didn't match any page token.
-    for i, wp in enumerate(valid_polys):
-        if i in matched_polys:
-            continue
-        words.append(
-            {
-                "content": str(wp.get("content") or ""),
-                "polygon": wp.get("polygon"),
-                "confidence": wp.get("confidence", 1.0),
-            }
-        )
+    if include_detector_only:
+        # Safety net: include detector-only words that didn't match any page
+        # token. Opt-in because DocTR's split or partial-recognition boxes
+        # surface as bogus tokens in the diff at the same positions as real
+        # ones.
+        for i, wp in enumerate(valid_polys):
+            if i in matched_polys:
+                continue
+            words.append(
+                {
+                    "content": str(wp.get("content") or ""),
+                    "polygon": wp.get("polygon"),
+                    "confidence": wp.get("confidence", 1.0),
+                }
+            )
 
     return words
 
 
-@router.post("/compare")
-async def compare_with_azure(
-    request: Request,
-    file: UploadFile | None = File(None),
-    azure_endpoint: str = Form(...),
-    azure_key: str = Form(default=""),
-    backend: str | None = Form(None),
-    expert_enable_layout: bool | None = Form(None),
-    expert_layout_model: str | None = Form(None),
-    expert_layout_threshold: float | None = Form(None),
-    expert_table_transformer: bool | None = Form(None),
-    expert_per_region_ocr: bool | None = Form(None),
-    expert_text_anchor: bool | None = Form(None),
-    expert_text_anchor_threshold: float | None = Form(None),
-    expert_word_detector: str | None = Form(None),
-    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
-) -> dict:
-    settings = get_settings()
-    if file is not None:
-        image_bytes = await file.read()
-        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
-    else:
-        image_bytes = await request.body()
-        content_type = _resolve_effective_content_type(
-            request.headers.get("content-type"), image_bytes
-        )
-    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+async def _execute_compare_against_azure(
+    *,
+    image_bytes: bytes,
+    content_type: str,
+    azure_endpoint: str,
+    azure_key: str,
+    pipeline: OCRBackendRouter,
+    verify_ssl: bool,
+    include_detector_only: bool,
+    backend: str | None = None,
+    expert_enable_layout: bool | None = None,
+    expert_layout_model: str | None = None,
+    expert_layout_threshold: float | None = None,
+    expert_table_transformer: bool | None = None,
+    expert_per_region_ocr: bool | None = None,
+    expert_text_anchor: bool | None = None,
+    expert_text_anchor_threshold: float | None = None,
+    expert_word_detector: str | None = None,
+) -> dict[str, object]:
+    """Run our-OCR + Azure OCR concurrently and build the compare response.
 
-    if not image_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")
-    if len(image_bytes) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß."
-        )
-
+    Shared between the /api/compare endpoint and the example warmer. Raises
+    on failure (callers translate to HTTPException or log + skip).
+    """
     our_task = asyncio.create_task(
         pipeline.run(
             backend=backend,
@@ -1851,38 +1961,14 @@ async def compare_with_azure(
             azure_key,
             image_bytes,
             content_type,
-            verify_ssl=settings.verify_ssl,
+            verify_ssl=verify_ssl,
         )
     )
     our_outcome, azure_outcome = await asyncio.gather(our_task, azure_task, return_exceptions=True)
-
     if isinstance(our_outcome, BaseException):
-        logger.exception("Unser OCR im Compare-Flow fehlgeschlagen", exc_info=our_outcome)
-        if isinstance(our_outcome, ValueError | TimeoutError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unser OCR-Fehler: {our_outcome}",
-            ) from our_outcome
-        if isinstance(our_outcome, httpx.HTTPError):
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"OCR-Backend nicht erreichbar: {our_outcome}",
-            ) from our_outcome
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OCR-Pipeline-Fehler: {type(our_outcome).__name__}: {our_outcome}",
-        ) from our_outcome
+        raise our_outcome
     if isinstance(azure_outcome, BaseException):
-        logger.exception("Azure-Aufruf im Compare-Flow fehlgeschlagen", exc_info=azure_outcome)
-        if isinstance(azure_outcome, ValueError | TimeoutError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Azure-Fehler: {azure_outcome}",
-            ) from azure_outcome
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Azure-Fehler: {azure_outcome}",
-        ) from azure_outcome
+        raise azure_outcome
 
     our_result, _ = our_outcome
     azure_response = azure_outcome
@@ -1918,14 +2004,16 @@ async def compare_with_azure(
             page_text = str(page.get("content") or "")
 
         if page_text.strip():
-            words = _build_ours_words_from_page_text(page_text, detector_polys)
+            words = _build_ours_words_from_page_text(
+                page_text,
+                detector_polys,
+                include_detector_only=include_detector_only,
+            )
         elif detector_polys:
             words = list(detector_polys)
         elif isinstance(page, dict):
             w = page.get("words")
-            words = (
-                cast(list[dict[str, object]], w) if isinstance(w, list) else []
-            )
+            words = cast(list[dict[str, object]], w) if isinstance(w, list) else []
         else:
             words = []
         our_words_per_page.append(words)
@@ -1965,6 +2053,94 @@ async def compare_with_azure(
         },
         "our_warnings": our_result.warnings,
     }
+
+
+@router.post("/compare")
+async def compare_with_azure(
+    request: Request,
+    file: UploadFile | None = File(None),
+    azure_endpoint: str = Form(...),
+    azure_key: str = Form(default=""),
+    backend: str | None = Form(None),
+    expert_enable_layout: bool | None = Form(None),
+    expert_layout_model: str | None = Form(None),
+    expert_layout_threshold: float | None = Form(None),
+    expert_table_transformer: bool | None = Form(None),
+    expert_per_region_ocr: bool | None = Form(None),
+    expert_text_anchor: bool | None = Form(None),
+    expert_text_anchor_threshold: float | None = Form(None),
+    expert_word_detector: str | None = Form(None),
+    expert_compare_include_detector_only: bool | None = Form(None),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
+) -> dict:
+    settings = get_settings()
+    include_detector_only = (
+        settings.ocr_expert_compare_include_detector_only
+        if expert_compare_include_detector_only is None
+        else expert_compare_include_detector_only
+    )
+    # When the request targets the configured preset endpoint, fall back to
+    # the server-side preset key so callers (e.g. the preset button) don't
+    # need to expose the secret in the browser.
+    effective_azure_key = azure_key
+    if (
+        not effective_azure_key
+        and settings.azure_preset_endpoint
+        and azure_endpoint.strip() == settings.azure_preset_endpoint
+        and settings.azure_preset_key
+    ):
+        effective_azure_key = settings.azure_preset_key
+    if file is not None:
+        image_bytes = await file.read()
+        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
+    else:
+        image_bytes = await request.body()
+        content_type = _resolve_effective_content_type(
+            request.headers.get("content-type"), image_bytes
+        )
+    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+
+    if not image_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")
+    if len(image_bytes) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Datei zu groß."
+        )
+
+    try:
+        return await _execute_compare_against_azure(
+            image_bytes=image_bytes,
+            content_type=content_type,
+            azure_endpoint=azure_endpoint,
+            azure_key=effective_azure_key,
+            pipeline=pipeline,
+            verify_ssl=settings.verify_ssl,
+            include_detector_only=include_detector_only,
+            backend=backend,
+            expert_enable_layout=expert_enable_layout,
+            expert_layout_model=expert_layout_model,
+            expert_layout_threshold=expert_layout_threshold,
+            expert_table_transformer=expert_table_transformer,
+            expert_per_region_ocr=expert_per_region_ocr,
+            expert_text_anchor=expert_text_anchor,
+            expert_text_anchor_threshold=expert_text_anchor_threshold,
+            expert_word_detector=expert_word_detector,
+        )
+    except (ValueError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OCR-Backend oder Azure nicht erreichbar: {exc}",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Compare-Flow fehlgeschlagen")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Compare-Fehler: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @compat_router.get("/ready")

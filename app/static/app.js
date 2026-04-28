@@ -60,6 +60,7 @@ const compareSectionEl = document.getElementById("compare-section");
 const compareFormEl = document.getElementById("compare-form");
 const azureEndpointEl = document.getElementById("azure-endpoint");
 const azureKeyEl = document.getElementById("azure-key");
+const comparePresetBtn = document.getElementById("compare-preset-btn");
 const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
 const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
@@ -1761,6 +1762,108 @@ function renderMarkdownPreview(markdown) {
   markdownPreviewWrapEl.classList.remove("hidden");
 }
 
+function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
+  lastResponse = data;
+  setAdvancedDirty(false);
+  let displayText = data.text || "(kein Inhalt)";
+  const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
+  let tableMatrices = [];
+
+  if (requestMode === "plain" && requestTask === "extract_table_markdown") {
+    const htmlTables = extractHtmlTableMatrices(displayText);
+    if (htmlTables.length > 0) {
+      tableMatrices = htmlTables;
+      displayText = matricesToMarkdown(htmlTables);
+    } else {
+      const markdownTable = extractMarkdownTableMatrix(displayText);
+      if (markdownTable) {
+        tableMatrices = [markdownTable];
+      }
+    }
+  }
+  if (data.mode === "structured" && data.schema_name === "table_basic") {
+    const structuredTable = buildMatrixFromStructuredTable(data.structured);
+    if (structuredTable) {
+      tableMatrices = [structuredTable];
+    }
+  }
+
+  const showStructured = data.mode === "structured" && !!data.structured;
+  const showTableCsv = tableMatrices.length > 0;
+  if (showStructured) {
+    outputEl.textContent = "";
+    clearMarkdownPreview();
+    clearDiffPanel();
+    clearResultViewSwitch();
+    tablePreviewBodyEl.innerHTML = "";
+    tablePreviewWrapEl.classList.add("hidden");
+    lastTableMatrices = [];
+  } else {
+    outputEl.textContent = displayText;
+    clearDiffPanel();
+    renderMarkdownPreview(markdownPreview);
+    renderTablePreview(tableMatrices);
+    const layoutPages = normalizeLayoutPages(data.layout);
+
+    pageImageDataUrls = data.page_images || [];
+    currentPageIndex = 0;
+    if (pageImageDataUrls.length > 0) {
+      populatePageSelector(pageImageDataUrls.length);
+      showPageImage(0);
+    } else {
+      pageSelectorWrapEl.classList.add("hidden");
+      renderLayoutOverlay(layoutPages, 0);
+      renderLayoutPanel(layoutPages, data.layout_visualizations, 0);
+    }
+
+    wordToggleBtnEl.setAttribute("aria-pressed", "false");
+    renderDiffOverlay(null);
+    compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
+    compareSummaryEl.classList.add("hidden");
+    configurePlainResultViews({
+      hasLayout:
+        layoutPages.length > 0 ||
+        (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
+      hasMarkdown: markdownPreview.trim().length > 0,
+    });
+    lastTableMatrices = tableMatrices;
+  }
+  structuredWrapEl.classList.toggle("hidden", !showStructured);
+  downloadBtn.classList.toggle("hidden", !showStructured);
+  downloadCsvBtn.classList.toggle("hidden", !showTableCsv);
+  if (showStructured) {
+    jsonOutputEl.innerHTML = highlightJson(data.structured);
+  } else {
+    jsonOutputEl.innerHTML = "";
+  }
+
+  const warnings = (data.warnings || []).join(" | ");
+  const backend = data.backend || backendFallback || "direct";
+  metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
+}
+
+function applyCompareResponse(data) {
+  lastDiff = data?.diff || null;
+  const pageCount = Array.isArray(lastDiff?.pages) ? lastDiff.pages.length : 0;
+  const matchedTotal = lastDiff?.matched_count ?? 0;
+  const mismatchedTotal = lastDiff?.mismatched_count ?? 0;
+  const onlyOursTotal = lastDiff?.only_ours_count ?? 0;
+  const onlyAzureTotal = lastDiff?.only_azure_count ?? 0;
+
+  const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
+  compareSummaryEl.innerHTML =
+    `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
+    `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
+    `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
+    `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzureTotal}</b></span>` +
+    `<span class="compare-total-hint">${pageLabel}</span>`;
+  compareSummaryEl.classList.remove("hidden");
+
+  if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
+    resultViewDiffBtnEl.click();
+  }
+}
+
 async function runOCR() {
   const selectedFile = currentFile();
   if (!selectedFile) {
@@ -1800,86 +1903,11 @@ async function runOCR() {
       throw new Error(detail || `HTTP ${response.status}: ${response.statusText}`);
     }
     const data = await response.json();
-
-    lastResponse = data;
-    setAdvancedDirty(false);
-    let displayText = data.text || "(kein Inhalt)";
-    const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
-    let tableMatrices = [];
-
-    if (requestMode === "plain" && requestTask === "extract_table_markdown") {
-      const htmlTables = extractHtmlTableMatrices(displayText);
-      if (htmlTables.length > 0) {
-        tableMatrices = htmlTables;
-        displayText = matricesToMarkdown(htmlTables);
-      } else {
-        const markdownTable = extractMarkdownTableMatrix(displayText);
-        if (markdownTable) {
-          tableMatrices = [markdownTable];
-        }
-      }
-    }
-    if (data.mode === "structured" && data.schema_name === "table_basic") {
-      const structuredTable = buildMatrixFromStructuredTable(data.structured);
-      if (structuredTable) {
-        tableMatrices = [structuredTable];
-      }
-    }
-
-    const showStructured = data.mode === "structured" && !!data.structured;
-    const showTableCsv = tableMatrices.length > 0;
-    if (showStructured) {
-      outputEl.textContent = "";
-      clearMarkdownPreview();
-      clearDiffPanel();
-      clearResultViewSwitch();
-      tablePreviewBodyEl.innerHTML = "";
-      tablePreviewWrapEl.classList.add("hidden");
-      lastTableMatrices = [];
-    } else {
-      outputEl.textContent = displayText;
-      clearDiffPanel();
-      renderMarkdownPreview(markdownPreview);
-      renderTablePreview(tableMatrices);
-      const layoutPages = normalizeLayoutPages(data.layout);
-
-      // PDF page images: show rendered pages as preview
-      pageImageDataUrls = data.page_images || [];
-      currentPageIndex = 0;
-      if (pageImageDataUrls.length > 0) {
-        populatePageSelector(pageImageDataUrls.length);
-        showPageImage(0);
-      } else {
-        pageSelectorWrapEl.classList.add("hidden");
-        renderLayoutOverlay(layoutPages, 0);
-        renderLayoutPanel(layoutPages, data.layout_visualizations, 0);
-      }
-
-      // Reset word toggle and diff overlay on new result
-      wordToggleBtnEl.setAttribute("aria-pressed", "false");
-      renderDiffOverlay(null);
-      compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
-      compareSummaryEl.classList.add("hidden");
-      configurePlainResultViews({
-        hasLayout:
-          layoutPages.length > 0 ||
-          (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
-        hasMarkdown: markdownPreview.trim().length > 0,
-      });
-      lastTableMatrices = tableMatrices;
-    }
-    structuredWrapEl.classList.toggle("hidden", !showStructured);
-    downloadBtn.classList.toggle("hidden", !showStructured);
-    downloadCsvBtn.classList.toggle("hidden", !showTableCsv);
-    if (showStructured) {
-      jsonOutputEl.innerHTML = highlightJson(data.structured);
-    } else {
-      jsonOutputEl.innerHTML = "";
-    }
-
-    const warnings = (data.warnings || []).join(" | ");
-    const backend = data.backend || String(payload.get("backend") || "direct");
-    metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
+    applyOcrResponse(data, {
+      requestMode,
+      requestTask,
+      backendFallback: String(payload.get("backend") || "direct"),
+    });
   } catch (error) {
     if (error.name === "AbortError") {
       return;
@@ -2167,6 +2195,11 @@ compareFormEl.addEventListener("submit", async (event) => {
     document.getElementById("expert_text_anchor_threshold")?.value,
   );
   appendIfSet("expert_word_detector", document.getElementById("expert_word_detector")?.value);
+  appendIfSet(
+    "expert_compare_include_detector_only",
+    document.getElementById("expert_compare_include_detector_only")?.value,
+    { bool: true },
+  );
   if (!fd.has("expert_enable_layout") && lastResponse?.analyzeResult?.pages?.[0]) {
     fd.append("expert_enable_layout", "true");
   }
@@ -2180,30 +2213,100 @@ compareFormEl.addEventListener("submit", async (event) => {
       return;
     }
     const data = await resp.json();
-    lastDiff = data.diff || null;
-    const pageCount = Array.isArray(lastDiff?.pages) ? lastDiff.pages.length : 0;
-    const matchedTotal = lastDiff?.matched_count ?? 0;
-    const mismatchedTotal = lastDiff?.mismatched_count ?? 0;
-    const onlyOursTotal = lastDiff?.only_ours_count ?? 0;
-    const onlyAzureTotal = lastDiff?.only_azure_count ?? 0;
-
-    const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
-    compareSummaryEl.innerHTML =
-      `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
-      `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzureTotal}</b></span>` +
-      `<span class="compare-total-hint">${pageLabel}</span>`;
-    compareSummaryEl.classList.remove("hidden");
-
-    if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
-      resultViewDiffBtnEl.click();
-    }
+    applyCompareResponse(data);
   } catch (err) {
     compareSummaryEl.textContent = `Netzwerkfehler: ${err.message}`;
   } finally {
     setLoading(false);
   }
+});
+
+if (comparePresetBtn) {
+  comparePresetBtn.addEventListener("click", () => {
+    const endpoint = comparePresetBtn.dataset.endpoint || "";
+    if (!endpoint) return;
+    azureEndpointEl.value = endpoint;
+    compareFormEl.requestSubmit();
+  });
+}
+
+async function _loadExampleFile(slot) {
+  const resp = await fetch(`${appBasePath}/api/examples/${slot}`);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || resp.statusText);
+  }
+  const blob = await resp.blob();
+  const disposition = resp.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : `example-${slot}`;
+  const file = new File([blob], filename, { type: blob.type });
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  fileEl.files = transfer.files;
+  setWorkspaceVisible(true);
+  updatePreview();
+}
+
+async function runExample(slot) {
+  const presetEndpoint = comparePresetBtn?.dataset.endpoint || "";
+
+  // Try the warm-at-boot cache first. Cache hit → instant: load the file
+  // for the preview, then apply the cached OCR + compare responses.
+  setLoading(true);
+  try {
+    let cached = null;
+    try {
+      const cachedResp = await fetch(`${appBasePath}/api/examples/${slot}/cached`);
+      if (cachedResp.ok) {
+        cached = await cachedResp.json();
+      }
+    } catch {
+      // Network error reaching the cached endpoint; fall through to live.
+    }
+
+    if (cached?.ocr_response) {
+      try {
+        await _loadExampleFile(slot);
+      } catch (err) {
+        metaEl.textContent = `Beispiel konnte nicht geladen werden: ${err.message}`;
+        return;
+      }
+      applyOcrResponse(cached.ocr_response, {
+        requestMode: "plain",
+        requestTask: "ocr_text",
+        backendFallback: cached.ocr_response.backend || "expert",
+      });
+      if (cached.compare_response) {
+        applyCompareResponse(cached.compare_response);
+      }
+      return;
+    }
+  } finally {
+    setLoading(false);
+  }
+
+  // Cache miss / not warmed yet → live path: fetch file, runOCR, compare.
+  try {
+    await _loadExampleFile(slot);
+  } catch (err) {
+    metaEl.textContent = `Beispiel konnte nicht geladen werden: ${err.message}`;
+    return;
+  }
+  await runOCR();
+  if (presetEndpoint) {
+    azureEndpointEl.value = presetEndpoint;
+    compareFormEl.requestSubmit();
+  }
+}
+
+document.querySelectorAll("button[data-example-slot]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const slot = Number(btn.dataset.exampleSlot);
+    if (Number.isFinite(slot) && slot > 0) {
+      void runExample(slot);
+    }
+  });
 });
 
 downloadCsvBtn.addEventListener("click", () => {

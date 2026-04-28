@@ -55,6 +55,18 @@
             </div>
             <div class="onboarding-actions">
               <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
+              {% if examples %}
+              <div class="example-actions" id="example-actions">
+                <span class="example-actions-label">Beispiele:</span>
+                {% for ex in examples %}
+                <button
+                  type="button"
+                  class="action-btn secondary-action example-btn"
+                  data-example-slot="{{ ex.slot }}"
+                >{{ ex.label }}</button>
+                {% endfor %}
+              </div>
+              {% endif %}
               <p class="onboarding-hint">
                 Unterstützt PNG, JPEG, WEBP, GIF, TIFF, mehrseitige PDFs, DOC und DOCX.
               </p>
@@ -267,6 +279,26 @@
             </label>
 
             <label>
+              Dev: Vergleich – Detektor-only-Wörter
+              <select
+                id="expert_compare_include_detector_only"
+                name="expert_compare_include_detector_only"
+              >
+                <option value="" selected>
+                  Standard ({{ "An" if default_expert_compare_include_detector_only else "Aus" }})
+                </option>
+                <option value="true">An</option>
+                <option value="false">Aus</option>
+              </select>
+              <span class="hint">
+                Aus (Standard): Vergleich basiert nur auf Tokens der Roh-OCR.
+                An: zusätzlich werden DocTR-Boxen, die zu keinem Roh-OCR-Token
+                passen, mit DocTR-Text aufgenommen — kann doppelte/bogus-Tokens
+                an gleicher Position erzeugen, falls der Detektor Boxen splittet.
+              </span>
+            </label>
+
+            <label>
               Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>
@@ -428,6 +460,14 @@
             <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
             <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
             <button type="submit" class="action-btn">Vergleichen</button>
+            {% if azure_preset_label and azure_preset_endpoint %}
+            <button
+              type="button"
+              class="action-btn secondary-action"
+              id="compare-preset-btn"
+              data-endpoint="{{ azure_preset_endpoint }}"
+            >{{ azure_preset_label }}</button>
+            {% endif %}
           </form>
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
           <p class="compare-hint">

@@ -49,6 +49,11 @@ class Settings:
     ocr_expert_per_region_ocr: bool
     ocr_expert_text_anchor: bool
     ocr_expert_text_anchor_threshold: float
+    ocr_expert_compare_include_detector_only: bool
+    azure_preset_label: str
+    azure_preset_endpoint: str
+    azure_preset_key: str
+    examples: tuple[tuple[str, str], ...]
     ocr_word_detector: str
     default_token_limit: int
     request_timeout_s: float
@@ -72,6 +77,13 @@ def get_settings() -> Settings:
     if ocr_backend not in {"direct", "expert"}:
         ocr_backend = "expert"
 
+    examples: list[tuple[str, str]] = []
+    for slot in range(1, 4):
+        label = os.getenv(f"EXAMPLE_{slot}_LABEL", "").strip()
+        path = os.getenv(f"EXAMPLE_{slot}_PATH", "").strip()
+        if label and path:
+            examples.append((label, path))
+
     return Settings(
         app_name=os.getenv("APP_NAME", "OCR-Demo"),
         app_base_path=os.getenv("APP_BASE_PATH", ""),
@@ -89,6 +101,13 @@ def get_settings() -> Settings:
         ocr_expert_per_region_ocr=_env_bool("OCR_EXPERT_PER_REGION_OCR", True),
         ocr_expert_text_anchor=_env_bool("OCR_EXPERT_TEXT_ANCHOR", True),
         ocr_expert_text_anchor_threshold=_env_float("OCR_EXPERT_TEXT_ANCHOR_THRESHOLD", 60.0),
+        ocr_expert_compare_include_detector_only=_env_bool(
+            "OCR_EXPERT_COMPARE_INCLUDE_DETECTOR_ONLY", False
+        ),
+        azure_preset_label=os.getenv("AZURE_PRESET_LABEL", "").strip(),
+        azure_preset_endpoint=os.getenv("AZURE_PRESET_ENDPOINT", "").strip(),
+        azure_preset_key=os.getenv("AZURE_PRESET_KEY", "").strip(),
+        examples=tuple(examples),
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "doctr").strip().lower(),
         default_token_limit=default_token_limit,
         verify_ssl=_env_bool("VERIFY_SSL", False),
