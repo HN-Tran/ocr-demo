@@ -286,9 +286,7 @@ def _remap_cells_to_page_coords(
 # ---------------------------------------------------------------------------
 
 
-def _poly_centroid(polygon: list[float]) -> tuple[float, float]:
-    n = max(len(polygon) // 2, 1)
-    return sum(polygon[0::2]) / n, sum(polygon[1::2]) / n
+_WORD_CONTENT_SIMILARITY_THRESHOLD = 70.0
 
 
 def _assign_word_content(
@@ -297,20 +295,20 @@ def _assign_word_content(
 ) -> list[dict[str, Any]]:
     """Assign text content to detected word polygons.
 
-    The detector (DocTR / PaddleOCR) is treated as the source of truth for
-    where the words are; its per-word recognition is preserved as fallback
-    text. Per-region OCR tokens are mapped onto the polygons in reading
-    order — one token per polygon — and override the detector text where
-    they cover. Polygons past the end of the region's token list keep the
-    detector text, so cells whose per-region OCR was incomplete (common
-    for tables where Ollama on the cropped image misses values) still
-    surface with DocTR's reading instead of being blanked.
+    Detector text (DocTR / PaddleOCR per-word recognition) is the floor:
+    every polygon starts with whatever the detector read. Per-region OCR
+    tokens are then matched to polygons by text similarity (rapidfuzz),
+    not by position. A polygon adopts a layout token only when the match
+    score crosses ``_WORD_CONTENT_SIMILARITY_THRESHOLD`` — this lets
+    Ollama's reading correct or polish detector text where the two
+    agree, while cells whose per-region OCR was missed entirely (common
+    for tables where Ollama on the cropped image collapses values) keep
+    DocTR's reading instead of being overridden by a neighbouring
+    token. Each layout token is consumed at most once.
     """
     result: list[dict[str, Any]] = [dict(wp) for wp in word_polys]
 
     # Group all polygon indices by the smallest containing region (by bbox).
-    # We always run assignment so layout-region tokens override detector
-    # text where they cover the polygon.
     region_poly_indices: dict[int, list[int]] = {}
     for poly_idx, wp in enumerate(word_polys):
         poly = wp.get("polygon") or []
@@ -353,35 +351,48 @@ def _assign_word_content(
 
     for r_idx, indices in region_poly_indices.items():
         region_content = str(regions[r_idx].get("content") or "")
-        lines = [line.strip() for line in region_content.splitlines() if line.strip()]
-        flat_tokens = [t for line in lines for t in line.split()]
+        flat_tokens = [
+            t
+            for line in region_content.splitlines()
+            if line.strip()
+            for t in line.split()
+        ]
+        if not flat_tokens:
+            continue
 
-        # Sort polygons by reading order using row-banding.
-        band_tolerance = 15  # in 0-1000 normalised coords
-        centroids = {i: _poly_centroid(word_polys[i]["polygon"]) for i in indices}
-        by_y = sorted(indices, key=lambda i: centroids[i][1])
-        bands: list[list[int]] = []
-        current: list[int] = []
-        band_y = 0.0
-        for i in by_y:
-            cy = centroids[i][1]
-            if not current or abs(cy - band_y) <= band_tolerance:
-                current.append(i)
-                band_y = sum(centroids[j][1] for j in current) / len(current)
+        used_tokens: set[int] = set()
+        for poly_idx in indices:
+            if poly_idx >= len(result):
+                continue
+            detector_text = str(result[poly_idx].get("content") or "").strip()
+
+            if detector_text:
+                best_token_idx: int | None = None
+                best_score = 0.0
+                detector_lc = detector_text.lower()
+                for token_idx, token in enumerate(flat_tokens):
+                    if token_idx in used_tokens:
+                        continue
+                    score = fuzz.ratio(detector_lc, token.lower())
+                    if score > best_score:
+                        best_score = score
+                        best_token_idx = token_idx
+                if (
+                    best_token_idx is not None
+                    and best_score >= _WORD_CONTENT_SIMILARITY_THRESHOLD
+                ):
+                    result[poly_idx]["content"] = flat_tokens[best_token_idx]
+                    used_tokens.add(best_token_idx)
+                # else: keep detector text — region OCR didn't catch this word.
             else:
-                bands.append(sorted(current, key=lambda j: centroids[j][0]))
-                current = [i]
-                band_y = cy
-        if current:
-            bands.append(sorted(current, key=lambda j: centroids[j][0]))
-
-        # 1-to-1 mapping in reading order. Each detected polygon gets the
-        # next per-region token if one is available; polygons past the end
-        # keep the detector content they already had.
-        indices_sorted = [i for band in bands for i in band]
-        for token_idx, poly_idx in enumerate(indices_sorted):
-            if poly_idx < len(result) and token_idx < len(flat_tokens):
-                result[poly_idx]["content"] = flat_tokens[token_idx]
+                # Detector couldn't recognize this polygon — fall back to the
+                # first unused layout token (positional, since we have no
+                # detector text to match against).
+                for token_idx, token in enumerate(flat_tokens):
+                    if token_idx not in used_tokens:
+                        result[poly_idx]["content"] = token
+                        used_tokens.add(token_idx)
+                        break
 
     return [r for r in result if r and r.get("polygon")]
 

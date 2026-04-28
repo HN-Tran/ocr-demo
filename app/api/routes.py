@@ -26,6 +26,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse, Response
+from rapidfuzz import fuzz
 
 from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
@@ -1717,6 +1718,76 @@ async def _call_azure_read(
         raise TimeoutError("Azure OCR Timeout")
 
 
+_OURS_POLYGON_MATCH_THRESHOLD = 70.0
+
+
+def _build_ours_words_from_page_text(
+    page_text: str,
+    word_polys: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Tokenize the page-level OCR text and attach detector polygons by text match.
+
+    Compare's ours-side is sourced from the page-level Ollama OCR (the text the
+    user actually sees in the Markdown tab) rather than from word_polys alone.
+    Each token gets a polygon from word_polys when one matches its text closely
+    (rapidfuzz ratio >= threshold); otherwise the token still appears in the
+    diff text-only — so words Ollama caught but DocTR didn't box (punctuation,
+    over-merged tokens) aren't dropped from the comparison.
+
+    Word polys whose content doesn't match any page-level token are still
+    included as a safety net (rare case where DocTR caught something Ollama
+    missed at the page level).
+    """
+    tokens = [m.group(0) for m in _WORD_RE.finditer(page_text or "")]
+
+    valid_polys: list[dict[str, object]] = [
+        wp for wp in (word_polys or []) if isinstance(wp, dict) and wp.get("polygon")
+    ]
+    matched_polys: set[int] = set()
+    words: list[dict[str, object]] = []
+
+    for token in tokens:
+        token_lc = token.lower()
+        best_idx: int | None = None
+        best_score = 0.0
+        for i, wp in enumerate(valid_polys):
+            if i in matched_polys:
+                continue
+            wp_text = str(wp.get("content") or "").strip()
+            if not wp_text:
+                continue
+            score = float(fuzz.ratio(token_lc, wp_text.lower()))
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx is not None and best_score >= _OURS_POLYGON_MATCH_THRESHOLD:
+            wp = valid_polys[best_idx]
+            words.append(
+                {
+                    "content": token,
+                    "polygon": wp.get("polygon"),
+                    "confidence": wp.get("confidence", 1.0),
+                }
+            )
+            matched_polys.add(best_idx)
+        else:
+            words.append({"content": token, "polygon": [], "confidence": 1.0})
+
+    # Safety net: include detector-only words that didn't match any page token.
+    for i, wp in enumerate(valid_polys):
+        if i in matched_polys:
+            continue
+        words.append(
+            {
+                "content": str(wp.get("content") or ""),
+                "polygon": wp.get("polygon"),
+                "confidence": wp.get("confidence", 1.0),
+            }
+        )
+
+    return words
+
+
 @router.post("/compare")
 async def compare_with_azure(
     request: Request,
@@ -1826,19 +1897,37 @@ async def compare_with_azure(
     our_pages_raw = our_analyze.get("pages")
     our_pages = our_pages_raw if isinstance(our_pages_raw, list) else []
     our_layout_pages = our_result.layout or []
+    our_page_texts: list[str] = list(getattr(our_result, "page_texts", None) or [])
     our_words_per_page: list[list[dict[str, object]]] = []
     for i, page in enumerate(our_pages):
-        # Prefer detector-provided word polygons (DocTR / PaddleOCR) over the
-        # words synthesized from layout regions in _build_line_and_word_entries.
+        # Source ours-words from the page-level OCR text (every word Ollama
+        # produced for the page) and attach detector polygons by text match.
+        # Ensures words the layout/per-region OCR missed but page-level OCR
+        # caught still appear in the diff against Azure.
         page_layout = our_layout_pages[i] if i < len(our_layout_pages) else None
-        detector_polys = page_layout.get("word_polys") if isinstance(page_layout, dict) else None
-        words: list[dict[str, object]] = []
-        if isinstance(detector_polys, list) and detector_polys:
-            words = [wp for wp in detector_polys if isinstance(wp, dict)]
+        detector_polys_raw = (
+            page_layout.get("word_polys") if isinstance(page_layout, dict) else None
+        )
+        detector_polys = (
+            [wp for wp in detector_polys_raw if isinstance(wp, dict)]
+            if isinstance(detector_polys_raw, list)
+            else []
+        )
+        page_text = our_page_texts[i] if i < len(our_page_texts) else ""
+        if not page_text and isinstance(page, dict):
+            page_text = str(page.get("content") or "")
+
+        if page_text.strip():
+            words = _build_ours_words_from_page_text(page_text, detector_polys)
+        elif detector_polys:
+            words = list(detector_polys)
         elif isinstance(page, dict):
             w = page.get("words")
-            if isinstance(w, list):
-                words = cast(list[dict[str, object]], w)
+            words = (
+                cast(list[dict[str, object]], w) if isinstance(w, list) else []
+            )
+        else:
+            words = []
         our_words_per_page.append(words)
 
     raw_azure = azure_response.get("analyzeResult")
