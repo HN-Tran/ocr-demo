@@ -110,6 +110,13 @@
               <label for="page-selector">Seite:</label>
               <select id="page-selector"></select>
             </div>
+            <div id="preview-zoom" class="preview-zoom hidden">
+              <button type="button" class="preview-zoom-step" id="preview-zoom-out" aria-label="Verkleinern">−</button>
+              <input type="range" id="preview-zoom-slider" min="0.5" max="3" step="0.05" value="1" />
+              <span id="preview-zoom-value" class="preview-zoom-value">100 %</span>
+              <button type="button" class="preview-zoom-step" id="preview-zoom-in" aria-label="Vergrößern">+</button>
+              <button type="button" class="preview-zoom-fit" id="preview-zoom-fit">Anpassen</button>
+            </div>
             <div id="preview-empty" class="preview-empty">Keine Datei ausgewählt.</div>
             <div id="preview-image-stage" class="preview-media preview-image-stage hidden">
               <div id="preview-image-frame" class="preview-image-frame">
@@ -423,6 +430,15 @@
           >
             Vergleich
           </button>
+          <button
+            id="result-view-metrics-btn"
+            class="result-view-btn"
+            type="button"
+            data-result-view="metrics"
+            aria-pressed="false"
+          >
+            Metriken
+          </button>
         </div>
         <section id="layout-wrap" class="hidden">
           <div class="layout-head">
@@ -445,55 +461,10 @@
         </section>
         <section id="diff-wrap" class="hidden">
           <div class="diff-head">
-            <h3>Vergleich mit Azure</h3>
-            <p id="diff-empty" class="diff-empty">Zuerst unten einen Azure-Endpunkt eintragen und Vergleichen klicken.</p>
+            <h3 id="diff-heading">Vergleich</h3>
+            <p id="diff-empty" class="diff-empty">Engine wählen, optional Referenztext eingeben und „Vergleichen“ klicken.</p>
           </div>
-          <div id="diff-groups" class="diff-groups hidden">
-            <details class="diff-group" open>
-              <summary>
-                <span class="diff-legend-dot diff-legend-matched" aria-hidden="true"></span>
-                Übereinstimmung
-                <span class="diff-group-count" id="diff-matched-count">0</span>
-              </summary>
-              <ul id="diff-matched-list" class="diff-list"></ul>
-            </details>
-            <details class="diff-group" open>
-              <summary>
-                <span class="diff-legend-dot diff-legend-mismatch" aria-hidden="true"></span>
-                Abweichung (gleicher Ort, anderer Text)
-                <span class="diff-group-count" id="diff-mismatch-count">0</span>
-              </summary>
-              <ul id="diff-mismatch-list" class="diff-list diff-list-pairs"></ul>
-            </details>
-            <details class="diff-group">
-              <summary>
-                <span class="diff-legend-dot diff-legend-ours" aria-hidden="true"></span>
-                Nur wir
-                <span class="diff-group-count" id="diff-ours-count">0</span>
-              </summary>
-              <ul id="diff-ours-list" class="diff-list"></ul>
-            </details>
-            <details class="diff-group">
-              <summary>
-                <span class="diff-legend-dot diff-legend-azure" aria-hidden="true"></span>
-                Nur Azure
-                <span class="diff-group-count" id="diff-azure-count">0</span>
-              </summary>
-              <ul id="diff-azure-list" class="diff-list"></ul>
-            </details>
-          </div>
-        </section>
-        <section id="table-preview-wrap" class="hidden">
-          <h3>Tabellenvorschau</h3>
-          <div id="table-preview-body"></div>
-        </section>
-        <pre id="output" class="visually-hidden" aria-hidden="true"></pre>
-        <section id="structured-wrap" class="hidden">
-          <h3>Strukturierte Nutzdaten</h3>
-          <pre id="json-output"></pre>
-        </section>
-        <section id="compare-section" class="hidden">
-          <h3>Vergleich mit externer OCR-Engine</h3>
+
           <form class="compare-form" id="compare-form">
             <label class="compare-engine-label">
               Engine
@@ -559,7 +530,6 @@
               {% endif %}
             </div>
           </form>
-          <p id="compare-summary" class="compare-diff-summary hidden"></p>
 
           <details class="compare-reference" id="compare-reference">
             <summary>Referenztext (optional, für CER/WER)</summary>
@@ -568,7 +538,7 @@
                 Liefere echten Text als Ground Truth, um CER, WER und Token-F1 zu
                 berechnen. Bei digitalen PDFs wird der eingebettete Textlayer
                 automatisch übernommen – per Häkchen ignorierbar, falls er
-                unleserlich ist.
+                unleserlich ist. Die Werte erscheinen im Tab „Metriken“.
               </p>
               <div class="compare-reference-row">
                 <span
@@ -595,6 +565,49 @@
             </div>
           </details>
 
+          <p id="compare-summary" class="compare-diff-summary hidden"></p>
+
+          <div id="diff-groups" class="diff-groups hidden">
+            <details class="diff-group" open>
+              <summary>
+                <span class="diff-legend-dot diff-legend-matched" aria-hidden="true"></span>
+                Übereinstimmung
+                <span class="diff-group-count" id="diff-matched-count">0</span>
+              </summary>
+              <ul id="diff-matched-list" class="diff-list"></ul>
+            </details>
+            <details class="diff-group" open>
+              <summary>
+                <span class="diff-legend-dot diff-legend-mismatch" aria-hidden="true"></span>
+                Abweichung (gleicher Ort, anderer Text)
+                <span class="diff-group-count" id="diff-mismatch-count">0</span>
+              </summary>
+              <ul id="diff-mismatch-list" class="diff-list diff-list-pairs"></ul>
+            </details>
+            <details class="diff-group">
+              <summary>
+                <span class="diff-legend-dot diff-legend-ours" aria-hidden="true"></span>
+                Nur wir
+                <span class="diff-group-count" id="diff-ours-count">0</span>
+              </summary>
+              <ul id="diff-ours-list" class="diff-list"></ul>
+            </details>
+            <details class="diff-group">
+              <summary>
+                <span class="diff-legend-dot diff-legend-azure" aria-hidden="true"></span>
+                <span id="diff-theirs-label">Nur Andere</span>
+                <span class="diff-group-count" id="diff-azure-count">0</span>
+              </summary>
+              <ul id="diff-azure-list" class="diff-list"></ul>
+            </details>
+          </div>
+        </section>
+
+        <section id="metrics-wrap" class="hidden">
+          <div class="layout-head">
+            <h3>Metriken</h3>
+            <p id="metrics-empty" class="diff-empty">Werte erscheinen, sobald ein Vergleich gelaufen ist oder ein Referenztext gesetzt wurde.</p>
+          </div>
           <div class="metrics-panel hidden" id="metrics-panel">
             <div class="metrics-tabs" role="tablist">
               <button
@@ -623,12 +636,15 @@
             </div>
             <div class="metrics-content" id="metrics-content"></div>
           </div>
-
-          <p class="compare-hint">
-            Details zu übereinstimmenden und abweichenden Wörtern erscheinen im Tab
-            „Vergleich“. Abweichungen zeigen beide Lesungen nebeneinander – die
-            Entscheidung, welche korrekt ist, liegt bei dir.
-          </p>
+        </section>
+        <section id="table-preview-wrap" class="hidden">
+          <h3>Tabellenvorschau</h3>
+          <div id="table-preview-body"></div>
+        </section>
+        <pre id="output" class="visually-hidden" aria-hidden="true"></pre>
+        <section id="structured-wrap" class="hidden">
+          <h3>Strukturierte Nutzdaten</h3>
+          <pre id="json-output"></pre>
         </section>
       </section>
     </main>

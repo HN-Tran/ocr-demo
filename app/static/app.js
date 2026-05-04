@@ -24,6 +24,11 @@ const resultViewLayoutBtnEl = document.getElementById("result-view-layout-btn");
 const resultViewWordsBtnEl = document.getElementById("result-view-words-btn");
 const resultViewMarkdownBtnEl = document.getElementById("result-view-markdown-btn");
 const resultViewDiffBtnEl = document.getElementById("result-view-diff-btn");
+const resultViewMetricsBtnEl = document.getElementById("result-view-metrics-btn");
+const metricsWrapEl = document.getElementById("metrics-wrap");
+const metricsEmptyEl = document.getElementById("metrics-empty");
+const diffHeadingEl = document.getElementById("diff-heading");
+const diffTheirsLabelEl = document.getElementById("diff-theirs-label");
 const diffWrapEl = document.getElementById("diff-wrap");
 const diffGroupsEl = document.getElementById("diff-groups");
 const diffEmptyEl = document.getElementById("diff-empty");
@@ -50,6 +55,12 @@ const previewEmptyEl = document.getElementById("preview-empty");
 const previewImageStageEl = document.getElementById("preview-image-stage");
 const previewImageEl = document.getElementById("preview-image");
 const previewLayoutOverlayEl = document.getElementById("preview-layout-overlay");
+const previewZoomEl = document.getElementById("preview-zoom");
+const previewZoomSliderEl = document.getElementById("preview-zoom-slider");
+const previewZoomValueEl = document.getElementById("preview-zoom-value");
+const previewZoomFitBtnEl = document.getElementById("preview-zoom-fit");
+const previewZoomInBtnEl = document.getElementById("preview-zoom-in");
+const previewZoomOutBtnEl = document.getElementById("preview-zoom-out");
 const previewPdfEl = document.getElementById("preview-pdf");
 const previewPdfLinkEl = document.getElementById("preview-pdf-link");
 const layoutWrapEl = document.getElementById("layout-wrap");
@@ -59,7 +70,6 @@ const wordsWrapEl = document.getElementById("words-wrap");
 const wordsSummaryEl = document.getElementById("words-summary");
 const wordsPagesEl = document.getElementById("words-pages");
 const layoutVisualizationsEl = document.getElementById("layout-visualizations");
-const compareSectionEl = document.getElementById("compare-section");
 const compareFormEl = document.getElementById("compare-form");
 const azureEndpointEl = document.getElementById("azure-endpoint");
 const azureKeyEl = document.getElementById("azure-key");
@@ -163,12 +173,14 @@ const RESULT_VIEW_BUTTONS = {
   words: resultViewWordsBtnEl,
   markdown: resultViewMarkdownBtnEl,
   diff: resultViewDiffBtnEl,
+  metrics: resultViewMetricsBtnEl,
 };
 const RESULT_VIEW_WRAPS = {
   layout: layoutWrapEl,
   words: wordsWrapEl,
   markdown: markdownPreviewWrapEl,
   diff: diffWrapEl,
+  metrics: metricsWrapEl,
 };
 
 function isStructuredMode(modeValue) {
@@ -505,7 +517,7 @@ function getActivePageDiff() {
   return lastDiff.pages[currentPageIndex] || lastDiff.pages[0] || null;
 }
 
-function configurePlainResultViews({ hasLayout, hasMarkdown }) {
+function configurePlainResultViews({ hasLayout, hasMarkdown, hasMetrics = false }) {
   const availableViews = [];
   if (hasLayout) {
     availableViews.push("layout");
@@ -515,6 +527,9 @@ function configurePlainResultViews({ hasLayout, hasMarkdown }) {
     availableViews.push("markdown");
   }
   availableViews.push("diff");
+  if (hasMetrics) {
+    availableViews.push("metrics");
+  }
   const defaultView = hasLayout ? "layout" : hasMarkdown ? "markdown" : "diff";
   setActiveResultView(defaultView, availableViews);
 }
@@ -728,6 +743,7 @@ function renderLayoutOverlay(layoutPages, pageIndex) {
     const shapeEl = document.createElementNS(svgNs, "polygon");
     shapeEl.classList.add("preview-layout-shape");
     shapeEl.dataset.regionKind = regionKind;
+    shapeEl.dataset.regionIndex = String(index);
     shapeEl.setAttribute(
       "points",
       shapePoints.map((point) => `${point.x},${point.y}`).join(" ")
@@ -745,6 +761,7 @@ function renderLayoutOverlay(layoutPages, pageIndex) {
     boxEl.style.height = `${percentages.height}%`;
 
     boxEl.dataset.regionKind = regionKind;
+    boxEl.dataset.regionIndex = String(index);
     const contentPreview = truncateText(region.content || "", 80);
     const confidenceValue = getRegionConfidence(region);
     const confidenceLabel = formatConfidence(confidenceValue);
@@ -1102,6 +1119,22 @@ function highlightDiffPair(pairKey, on) {
   previewLayoutOverlayEl
     .querySelectorAll(`[data-pair-key="${pairKey}"]`)
     .forEach((el) => el.classList.toggle("is-highlighted", !!on));
+  // Toggle a parent class so other boxes can be visually muted via CSS.
+  previewLayoutOverlayEl.classList.toggle(
+    "has-hover",
+    !!previewLayoutOverlayEl.querySelector(".is-highlighted"),
+  );
+}
+
+function _highlightRegion(regionIndex, on) {
+  if (regionIndex == null) return;
+  previewLayoutOverlayEl
+    .querySelectorAll(`[data-region-index="${regionIndex}"]`)
+    .forEach((el) => el.classList.toggle("is-highlighted", !!on));
+  previewLayoutOverlayEl.classList.toggle(
+    "has-hover",
+    !!previewLayoutOverlayEl.querySelector(".is-highlighted"),
+  );
 }
 
 function renderLayoutVisualizations(visualizations) {
@@ -1191,6 +1224,13 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
       const label = String(region.label || `Region ${regionIndex + 1}`);
       const regionKind = normalizeLayoutRegionKind(label);
       regionItemEl.dataset.regionKind = regionKind;
+      regionItemEl.dataset.regionIndex = String(regionIndex);
+      regionItemEl.addEventListener("mouseenter", () =>
+        _highlightRegion(regionIndex, true),
+      );
+      regionItemEl.addEventListener("mouseleave", () =>
+        _highlightRegion(regionIndex, false),
+      );
 
       const regionHeadEl = document.createElement("div");
       regionHeadEl.className = "layout-region-head";
@@ -1848,6 +1888,14 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     lastTableMatrices = [];
   } else {
     outputEl.textContent = displayText;
+    // New OCR run → previous compare results no longer apply.
+    lastDiff = null;
+    lastMetrics = null;
+    renderMetricsPanel(null);
+    if (diffHeadingEl) diffHeadingEl.textContent = "Vergleich";
+    if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = "Nur Andere";
+    if (diffGroupsEl) diffGroupsEl.classList.add("hidden");
+    diffEmptyEl?.classList.remove("hidden");
     clearDiffPanel();
     renderMarkdownPreview(markdownPreview);
     renderTablePreview(tableMatrices);
@@ -1865,13 +1913,13 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     }
 
     renderDiffOverlay(null);
-    compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
     compareSummaryEl.classList.add("hidden");
     configurePlainResultViews({
       hasLayout:
         layoutPages.length > 0 ||
         (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
       hasMarkdown: markdownPreview.trim().length > 0,
+      hasMetrics: !!lastMetrics,
     });
     lastTableMatrices = tableMatrices;
   }
@@ -1927,6 +1975,8 @@ function applyCompareResponse(data) {
 
   const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
   const theirsLabel = data?.engine?.label || "Andere";
+  if (diffHeadingEl) diffHeadingEl.textContent = `Vergleich · ${theirsLabel}`;
+  if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = `Nur ${theirsLabel}`;
   compareSummaryEl.innerHTML =
     `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
@@ -1937,9 +1987,9 @@ function applyCompareResponse(data) {
 
   renderMetricsPanel(lastMetrics);
 
-  if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
-    resultViewDiffBtnEl.click();
-  }
+  // Show the diff list groups now that we have data; show the metrics tab too.
+  diffEmptyEl?.classList.add("hidden");
+  if (diffGroupsEl) diffGroupsEl.classList.remove("hidden");
 }
 
 function _fmtNumber(value, { digits = 3, percent = false } = {}) {
@@ -2083,7 +2133,15 @@ function _renderReferenceTab(reference) {
 }
 
 function renderMetricsPanel(metrics) {
-  if (!metrics || (!metrics.intrinsic && !metrics.comparison && !metrics.reference)) {
+  const hasAny = !!(metrics && (metrics.intrinsic || metrics.comparison || metrics.reference));
+  // Reveal/hide the Metriken result-view tab itself based on availability.
+  if (resultViewMetricsBtnEl) {
+    resultViewMetricsBtnEl.classList.toggle("hidden", !hasAny);
+  }
+  if (metricsEmptyEl) {
+    metricsEmptyEl.classList.toggle("hidden", hasAny);
+  }
+  if (!hasAny) {
     metricsPanelEl?.classList.add("hidden");
     if (metricsContentEl) metricsContentEl.innerHTML = "";
     return;
@@ -2397,6 +2455,34 @@ fileEl.addEventListener("change", () => {
 previewImageEl.addEventListener("load", () => {
   const layoutPages = normalizeLayoutPages(lastResponse?.layout);
   renderLayoutOverlay(layoutPages, currentPageIndex);
+  if (previewZoomEl) previewZoomEl.classList.remove("hidden");
+  applyPreviewZoom(1);
+});
+
+function applyPreviewZoom(scale) {
+  const clamped = Math.min(3, Math.max(0.5, Number(scale) || 1));
+  if (previewImageEl) {
+    previewImageEl.style.transform = clamped === 1 ? "" : `scale(${clamped})`;
+  }
+  if (previewLayoutOverlayEl) {
+    previewLayoutOverlayEl.style.transform = previewImageEl?.style.transform || "";
+    previewLayoutOverlayEl.style.transformOrigin = "top center";
+  }
+  if (previewZoomSliderEl) previewZoomSliderEl.value = String(clamped);
+  if (previewZoomValueEl) previewZoomValueEl.textContent = `${Math.round(clamped * 100)} %`;
+}
+
+previewZoomSliderEl?.addEventListener("input", () => {
+  applyPreviewZoom(previewZoomSliderEl.value);
+});
+previewZoomFitBtnEl?.addEventListener("click", () => applyPreviewZoom(1));
+previewZoomInBtnEl?.addEventListener("click", () => {
+  const cur = Number(previewZoomSliderEl?.value || 1);
+  applyPreviewZoom(cur + 0.1);
+});
+previewZoomOutBtnEl?.addEventListener("click", () => {
+  const cur = Number(previewZoomSliderEl?.value || 1);
+  applyPreviewZoom(cur - 0.1);
 });
 previewImageEl.addEventListener("error", () => {
   const file = currentFile();

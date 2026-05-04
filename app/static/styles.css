@@ -428,6 +428,62 @@ button:disabled {
   width: auto;
   height: auto;
   border-radius: 6px;
+  transform-origin: top center;
+  transition: transform 0.12s ease;
+}
+
+.preview-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.preview-zoom-step {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0;
+}
+
+.preview-zoom-step:hover {
+  border-color: var(--accent);
+}
+
+.preview-zoom-fit {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.preview-zoom-fit:hover {
+  border-color: var(--accent);
+}
+
+#preview-zoom-slider {
+  flex: 1;
+  min-width: 80px;
+  max-width: 220px;
+}
+
+.preview-zoom-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.4rem;
+  text-align: right;
 }
 
 .preview-layout-overlay {
@@ -1138,8 +1194,41 @@ pre {
   vector-effect: non-scaling-stroke;
 }
 .preview-diff-svg polygon.is-highlighted {
-  stroke-width: 0.6;
-  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.35));
+  stroke-width: 1.4;
+  fill-opacity: 0.6;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 6px rgba(0, 0, 0, 0.4));
+  animation: hover-pulse 0.5s ease-out;
+}
+
+/* Wenn ein Highlight aktiv ist, alle anderen Boxen abschwächen,
+   damit die ausgewählte deutlicher hervortritt. */
+.preview-layout-overlay.has-hover .preview-layout-box:not(.is-highlighted),
+.preview-layout-overlay.has-hover .preview-layout-svg polygon:not(.is-highlighted),
+.preview-layout-overlay.has-hover .preview-diff-svg polygon:not(.is-highlighted),
+.preview-layout-overlay.has-hover .preview-word-svg polygon:not(.is-highlighted) {
+  opacity: 0.25;
+}
+
+.preview-layout-box.is-highlighted,
+.preview-layout-svg polygon.is-highlighted,
+.preview-word-svg polygon.is-highlighted {
+  stroke-width: 1.4;
+  fill-opacity: 0.55;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 6px rgba(0, 0, 0, 0.4));
+  animation: hover-pulse 0.5s ease-out;
+}
+
+.preview-layout-box.is-highlighted {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+@keyframes hover-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.015); }
+  100% { transform: scale(1); }
 }
 
 .diff-legend-item { font-weight: 500; }
