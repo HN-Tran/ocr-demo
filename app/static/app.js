@@ -859,12 +859,13 @@ function renderWordOverlay(annotatedWords) {
   svgEl.classList.add("preview-layout-svg", "preview-word-svg");
   previewLayoutOverlayEl.appendChild(svgEl);
 
-  annotatedWords.forEach((word) => {
+  annotatedWords.forEach((word, idx) => {
     const points = normalizedPolygonToPercentages(word.polygon);
     if (!points) return;
     const shapeEl = document.createElementNS(svgNs, "polygon");
     shapeEl.classList.add("preview-word-shape");
     if (word.regionKind) shapeEl.dataset.regionKind = word.regionKind;
+    shapeEl.dataset.wordIndex = String(idx);
     shapeEl.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
     shapeEl.title = word.content ? `${word.regionLabel}: ${word.content}` : (word.regionLabel || "");
     svgEl.appendChild(shapeEl);
@@ -889,14 +890,15 @@ function renderWordSidebar(annotatedWords, regions) {
   }
   const unknownGroup = { label: "Unbekannt", regionKind: "other", words: [] };
 
-  for (const word of annotatedWords) {
+  annotatedWords.forEach((word, idx) => {
+    const entry = { word, idx };
     const group = groups.find((g) => g.label === word.regionLabel);
     if (group) {
-      group.words.push(word);
+      group.words.push(entry);
     } else {
-      unknownGroup.words.push(word);
+      unknownGroup.words.push(entry);
     }
-  }
+  });
   if (unknownGroup.words.length > 0) groups.push(unknownGroup);
 
   for (const group of groups) {
@@ -913,15 +915,31 @@ function renderWordSidebar(annotatedWords, regions) {
 
     const listEl = document.createElement("ul");
     listEl.className = "word-list";
-    group.words.forEach((word) => {
+    group.words.forEach(({ word, idx }) => {
       const li = document.createElement("li");
       li.className = "word-item";
       li.textContent = word.content || "";
+      li.dataset.wordIndex = String(idx);
+      const hasBox = Array.isArray(word.polygon) && word.polygon.length >= 8;
+      if (!hasBox) li.dataset.hasBox = "false";
+      li.addEventListener("mouseenter", () => _highlightWord(idx, true));
+      li.addEventListener("mouseleave", () => _highlightWord(idx, false));
       listEl.appendChild(li);
     });
     sectionEl.appendChild(listEl);
     wordsPagesEl.appendChild(sectionEl);
   }
+}
+
+function _highlightWord(wordIndex, on) {
+  if (wordIndex == null) return;
+  previewLayoutOverlayEl
+    .querySelectorAll(`.preview-word-svg [data-word-index="${wordIndex}"]`)
+    .forEach((el) => el.classList.toggle("is-highlighted", !!on));
+  previewLayoutOverlayEl.classList.toggle(
+    "has-hover",
+    !!previewLayoutOverlayEl.querySelector(".is-highlighted"),
+  );
 }
 
 function applyWordMode(active, layoutPages) {
@@ -1090,12 +1108,17 @@ function renderDiffPanel(diff) {
     diffMismatchListEl.appendChild(li);
   });
 
+  const hasBox = (w) => Array.isArray(w?.polygon) && w.polygon.length >= 8;
   diffOursListEl.innerHTML = "";
   onlyOurs.forEach((w, idx) => {
     const li = document.createElement("li");
     li.className = "diff-row diff-row-ours";
     li.dataset.pairKey = `o-${idx}`;
     li.textContent = w.content || "";
+    if (!hasBox(w)) {
+      li.dataset.hasBox = "false";
+      li.title = "Keine Koordinaten — Token kommt nur im Seitentext vor.";
+    }
     diffOursListEl.appendChild(li);
   });
 
@@ -1105,6 +1128,10 @@ function renderDiffPanel(diff) {
     li.className = "diff-row diff-row-azure";
     li.dataset.pairKey = `a-${idx}`;
     li.textContent = w.content || "";
+    if (!hasBox(w)) {
+      li.dataset.hasBox = "false";
+      li.title = "Keine Koordinaten verfügbar.";
+    }
     diffAzureListEl.appendChild(li);
   });
 
@@ -1942,6 +1969,13 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
 async function maybeFetchReferenceMetrics(hypothesisText) {
   const refText = effectiveReferenceText();
   if (!hypothesisText || !refText || !refText.trim()) {
+    // Referenz wurde geleert → Referenz-Block aus den Metriken entfernen.
+    if (lastMetrics?.reference) {
+      const { reference: _drop, ...rest } = lastMetrics;
+      const hasOther = !!(rest.intrinsic || rest.comparison);
+      lastMetrics = hasOther ? { ...rest, reference: null } : null;
+      renderMetricsPanel(lastMetrics);
+    }
     return;
   }
   try {
@@ -1977,19 +2011,34 @@ function applyCompareResponse(data) {
   const theirsLabel = data?.engine?.label || "Andere";
   if (diffHeadingEl) diffHeadingEl.textContent = `Vergleich · ${theirsLabel}`;
   if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = `Nur ${theirsLabel}`;
+  const ourWarnings = Array.isArray(data?.our_warnings) ? data.our_warnings : [];
+  const theirWarnings = Array.isArray(data?.their_warnings) ? data.their_warnings : [];
+  const warningsHtml = [
+    ...ourWarnings.map((w) => `<div class="compare-warning">⚠ Wir: ${escapeHtml(w)}</div>`),
+    ...theirWarnings.map(
+      (w) => `<div class="compare-warning">⚠ ${escapeHtml(theirsLabel)}: ${escapeHtml(w)}</div>`,
+    ),
+  ].join("");
   compareSummaryEl.innerHTML =
     `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-azure">Nur ${escapeHtml(theirsLabel)}: <b>${onlyTheirsTotal}</b></span>` +
-    `<span class="compare-total-hint">${pageLabel}</span>`;
+    `<span class="compare-total-hint">${pageLabel}</span>` +
+    warningsHtml;
   compareSummaryEl.classList.remove("hidden");
 
   renderMetricsPanel(lastMetrics);
 
-  // Show the diff list groups now that we have data; show the metrics tab too.
+  // Show the diff list groups now that we have data, and re-render the page
+  // diff so the count badges + per-group lists pick up the fresh values
+  // immediately (otherwise they stay at the previous run's stale "0" until
+  // a tab switch triggers syncOverlayToActiveView).
   diffEmptyEl?.classList.add("hidden");
   if (diffGroupsEl) diffGroupsEl.classList.remove("hidden");
+  const pageDiff = getActivePageDiff();
+  renderDiffPanel(pageDiff);
+  renderDiffOverlay(pageDiff);
 }
 
 function _fmtNumber(value, { digits = 3, percent = false } = {}) {
@@ -2252,8 +2301,27 @@ async function maybeFetchEmbeddedPdfReference(file) {
   }
 }
 
+let _referenceMetricsDebounce = 0;
+function _scheduleReferenceMetricsRefresh() {
+  // OCR muss vorher gelaufen sein — sonst gibt's keine Hypothese.
+  const hyp = lastResponse?.text || "";
+  if (!hyp) {
+    // Wenn keine OCR-Antwort vorliegt, nur den Referenz-Block leeren.
+    if (lastMetrics?.reference) {
+      lastMetrics = { ...lastMetrics, reference: null };
+      renderMetricsPanel(lastMetrics);
+    }
+    return;
+  }
+  window.clearTimeout(_referenceMetricsDebounce);
+  _referenceMetricsDebounce = window.setTimeout(() => {
+    void maybeFetchReferenceMetrics(hyp);
+  }, 350);
+}
+
 referenceTextEl?.addEventListener("input", () => {
   manualReferenceText = referenceTextEl.value;
+  _scheduleReferenceMetricsRefresh();
 });
 
 referenceClearBtnEl?.addEventListener("click", () => {
@@ -2262,6 +2330,7 @@ referenceClearBtnEl?.addEventListener("click", () => {
   if (embeddedReferenceText && !referenceIgnoreEmbeddedEl?.checked) {
     _syncReferenceTextarea();
   }
+  _scheduleReferenceMetricsRefresh();
 });
 
 referenceFileEl?.addEventListener("change", async () => {
@@ -2275,9 +2344,13 @@ referenceFileEl?.addEventListener("change", async () => {
     /* ignore */
   }
   referenceFileEl.value = "";
+  _scheduleReferenceMetricsRefresh();
 });
 
-referenceIgnoreEmbeddedEl?.addEventListener("change", _syncReferenceTextarea);
+referenceIgnoreEmbeddedEl?.addEventListener("change", () => {
+  _syncReferenceTextarea();
+  _scheduleReferenceMetricsRefresh();
+});
 
 async function runOCR() {
   const selectedFile = currentFile();

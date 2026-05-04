@@ -1194,11 +1194,26 @@ pre {
   vector-effect: non-scaling-stroke;
 }
 .preview-diff-svg polygon.is-highlighted {
-  stroke-width: 1.4;
-  fill-opacity: 0.6;
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.55))
-    drop-shadow(0 0 6px rgba(0, 0, 0, 0.4));
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))
+    drop-shadow(0 0 6px rgba(0, 0, 0, 0.45));
   animation: hover-pulse 0.5s ease-out;
+}
+
+/* Per-shape brighter fill on hover. The base diff fills are pre-mixed
+   with `transparent` (≤18% alpha), so plain `fill-opacity` overrides
+   make them less visible, not more — we have to override the fill itself. */
+.preview-diff-shape-matched.is-highlighted {
+  fill: color-mix(in srgb, #22c55e 60%, transparent);
+}
+.preview-diff-shape-mismatch.is-highlighted {
+  fill: color-mix(in srgb, #f97316 65%, transparent);
+}
+.preview-diff-shape-ours.is-highlighted {
+  fill: color-mix(in srgb, #eab308 65%, transparent);
+}
+.preview-diff-shape-azure.is-highlighted {
+  fill: color-mix(in srgb, #ef4444 65%, transparent);
 }
 
 /* Wenn ein Highlight aktiv ist, alle anderen Boxen abschwächen,
@@ -1229,6 +1244,29 @@ pre {
   0%   { transform: scale(1); }
   40%  { transform: scale(1.015); }
   100% { transform: scale(1); }
+}
+
+/* Tokens without polygon coordinates — hover can't highlight on the preview,
+   so visually mark the row and dim it slightly. */
+.diff-row[data-has-box="false"],
+.word-item[data-has-box="false"] {
+  opacity: 0.6;
+  cursor: help;
+  position: relative;
+}
+
+.diff-row[data-has-box="false"]::after,
+.word-item[data-has-box="false"]::after {
+  content: "ohne Box";
+  margin-left: 0.45rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
 }
 
 .diff-legend-item { font-weight: 500; }
@@ -1371,6 +1409,31 @@ pre {
   font-size: 0.95rem;
 }
 
+.compare-controls {
+  margin-top: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+  padding: 0.5rem 0.7rem;
+}
+
+.compare-controls > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+  list-style: revert;
+}
+
+.compare-controls[open] > summary {
+  margin-bottom: 0.55rem;
+  color: var(--ink);
+}
+
+.compare-controls-body {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .compare-form {
   display: grid;
   gap: 0.5rem;
@@ -1442,6 +1505,16 @@ pre {
 
 .compare-diff-summary b {
   color: var(--ink);
+}
+
+.compare-warning {
+  display: block;
+  margin-top: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border-left: 3px solid #f59e0b;
+  background: color-mix(in srgb, #f59e0b 10%, transparent);
+  color: var(--ink);
+  font-size: 0.78rem;
 }
 
 /* Reference text input + metrics panel */

@@ -2116,6 +2116,7 @@ async def _execute_compare(
         },
         "metrics": metrics,
         "our_warnings": our_result.warnings,
+        "their_warnings": list(getattr(their_engine_result, "warnings", []) or []),
     }
 
 

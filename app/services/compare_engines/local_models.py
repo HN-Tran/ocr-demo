@@ -58,5 +58,6 @@ class LocalModelsEngine:
         return EngineResult(
             text=result.text,
             words_per_page=_extract_words_per_page(result.layout),
+            warnings=list(result.warnings or []),
             raw=None,
         )

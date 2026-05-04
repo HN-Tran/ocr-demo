@@ -26,6 +26,10 @@ class EngineResult:
     Overlay, der Text-Diff funktioniert aber weiterhin.
     """
 
+    warnings: list[str] = field(default_factory=list)
+    """Engine-Warnungen, falls die Engine sie freiwillig liefert (z. B.
+    fehlgeschlagene Seiten-OCR bei einem nachgeladenen lokalen Modell)."""
+
     raw: dict[str, Any] | None = None
     """Optional: rohe API-Antwort, nur fürs Debuggen."""
 

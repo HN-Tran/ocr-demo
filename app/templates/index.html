@@ -462,108 +462,8 @@
         <section id="diff-wrap" class="hidden">
           <div class="diff-head">
             <h3 id="diff-heading">Vergleich</h3>
-            <p id="diff-empty" class="diff-empty">Engine wählen, optional Referenztext eingeben und „Vergleichen“ klicken.</p>
+            <p id="diff-empty" class="diff-empty">Engine unten wählen, optional Referenztext eingeben und „Vergleichen“ klicken.</p>
           </div>
-
-          <form class="compare-form" id="compare-form">
-            <label class="compare-engine-label">
-              Engine
-              <select id="compare-engine">
-                {% for eng in compare_engines %}
-                <option value="{{ eng.name }}">{{ eng.label }}</option>
-                {% endfor %}
-              </select>
-            </label>
-
-            <div class="engine-fields" data-engine="azure">
-              <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
-              <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
-            </div>
-
-            <div class="engine-fields hidden" data-engine="local_models">
-              <label class="engine-fields-label">
-                Eigenes Modell
-                <select id="our-model"></select>
-              </label>
-              <label class="engine-fields-label">
-                Vergleichsmodell
-                <select id="their-model"></select>
-              </label>
-            </div>
-
-            <div class="engine-fields hidden" data-engine="self_peer">
-              <input id="peer-base-url" type="url" placeholder="Peer-Basis-URL (z. B. https://…)" autocomplete="off" />
-              <input id="peer-backend" type="text" placeholder="Backend (optional, z. B. expert)" autocomplete="off" />
-              <label class="engine-fields-label">
-                Peer-Modell
-                <select id="peer-model-select" class="hidden"></select>
-                <input id="peer-model-input" type="text" placeholder="Modellname (z. B. glm-ocr:latest)" autocomplete="off" />
-              </label>
-              <p id="peer-model-hint" class="engine-fields-hint hidden"></p>
-            </div>
-
-            <div class="engine-fields hidden" data-engine="google_vision">
-              <input id="google-api-key" type="password" placeholder="Google-Vision-API-Key" autocomplete="off" />
-            </div>
-
-            <div class="engine-fields hidden" data-engine="plain_text">
-              <input id="plain-text-url" type="url" placeholder="Endpunkt-URL" autocomplete="off" />
-              <div class="engine-fields-row">
-                <input id="plain-text-method" type="text" placeholder="Methode (POST)" autocomplete="off" />
-                <input id="plain-text-field" type="text" placeholder="JSON-Feld (text)" autocomplete="off" />
-              </div>
-              <div class="engine-fields-row">
-                <input id="plain-text-auth-header" type="text" placeholder="Auth-Header (optional)" autocomplete="off" />
-                <input id="plain-text-auth-value" type="text" placeholder="Auth-Wert (optional)" autocomplete="off" />
-              </div>
-            </div>
-
-            <div class="compare-actions">
-              <button type="submit" class="action-btn">Vergleichen</button>
-              {% if azure_preset_label and azure_preset_endpoint %}
-              <button
-                type="button"
-                class="action-btn secondary-action"
-                id="compare-preset-btn"
-                data-endpoint="{{ azure_preset_endpoint }}"
-              >{{ azure_preset_label }}</button>
-              {% endif %}
-            </div>
-          </form>
-
-          <details class="compare-reference" id="compare-reference">
-            <summary>Referenztext (optional, für CER/WER)</summary>
-            <div class="compare-reference-body">
-              <p class="compare-reference-hint">
-                Liefere echten Text als Ground Truth, um CER, WER und Token-F1 zu
-                berechnen. Bei digitalen PDFs wird der eingebettete Textlayer
-                automatisch übernommen – per Häkchen ignorierbar, falls er
-                unleserlich ist. Die Werte erscheinen im Tab „Metriken“.
-              </p>
-              <div class="compare-reference-row">
-                <span
-                  class="compare-reference-badge hidden"
-                  id="reference-source-badge"
-                >Aus PDF entnommen</span>
-                <label class="compare-reference-checkbox hidden" id="reference-ignore-wrap">
-                  <input type="checkbox" id="reference-ignore-embedded" />
-                  Eingebetteten Text ignorieren
-                </label>
-              </div>
-              <textarea
-                id="reference-text"
-                rows="6"
-                placeholder="Referenztext hier einfügen oder .txt-Datei hochladen…"
-              ></textarea>
-              <div class="compare-reference-row">
-                <label class="compare-reference-upload">
-                  <input type="file" id="reference-file" accept=".txt,text/plain" />
-                  <span>.txt hochladen</span>
-                </label>
-                <button type="button" class="compare-reference-clear" id="reference-clear-btn">Leeren</button>
-              </div>
-            </div>
-          </details>
 
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
 
@@ -601,6 +501,111 @@
               <ul id="diff-azure-list" class="diff-list"></ul>
             </details>
           </div>
+
+          <details class="compare-controls" open>
+            <summary>Konfiguration & Referenztext</summary>
+            <div class="compare-controls-body">
+              <form class="compare-form" id="compare-form">
+                <label class="compare-engine-label">
+                  Engine
+                  <select id="compare-engine">
+                    {% for eng in compare_engines %}
+                    <option value="{{ eng.name }}">{{ eng.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+
+                <div class="engine-fields" data-engine="azure">
+                  <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
+                  <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
+                </div>
+
+                <div class="engine-fields hidden" data-engine="local_models">
+                  <label class="engine-fields-label">
+                    Eigenes Modell
+                    <select id="our-model"></select>
+                  </label>
+                  <label class="engine-fields-label">
+                    Vergleichsmodell
+                    <select id="their-model"></select>
+                  </label>
+                </div>
+
+                <div class="engine-fields hidden" data-engine="self_peer">
+                  <input id="peer-base-url" type="url" placeholder="Peer-Basis-URL (z. B. https://…)" autocomplete="off" />
+                  <input id="peer-backend" type="text" placeholder="Backend (optional, z. B. expert)" autocomplete="off" />
+                  <label class="engine-fields-label">
+                    Peer-Modell
+                    <select id="peer-model-select" class="hidden"></select>
+                    <input id="peer-model-input" type="text" placeholder="Modellname (z. B. glm-ocr:latest)" autocomplete="off" />
+                  </label>
+                  <p id="peer-model-hint" class="engine-fields-hint hidden"></p>
+                </div>
+
+                <div class="engine-fields hidden" data-engine="google_vision">
+                  <input id="google-api-key" type="password" placeholder="Google-Vision-API-Key" autocomplete="off" />
+                </div>
+
+                <div class="engine-fields hidden" data-engine="plain_text">
+                  <input id="plain-text-url" type="url" placeholder="Endpunkt-URL" autocomplete="off" />
+                  <div class="engine-fields-row">
+                    <input id="plain-text-method" type="text" placeholder="Methode (POST)" autocomplete="off" />
+                    <input id="plain-text-field" type="text" placeholder="JSON-Feld (text)" autocomplete="off" />
+                  </div>
+                  <div class="engine-fields-row">
+                    <input id="plain-text-auth-header" type="text" placeholder="Auth-Header (optional)" autocomplete="off" />
+                    <input id="plain-text-auth-value" type="text" placeholder="Auth-Wert (optional)" autocomplete="off" />
+                  </div>
+                </div>
+
+                <div class="compare-actions">
+                  <button type="submit" class="action-btn">Vergleichen</button>
+                  {% if azure_preset_label and azure_preset_endpoint %}
+                  <button
+                    type="button"
+                    class="action-btn secondary-action"
+                    id="compare-preset-btn"
+                    data-endpoint="{{ azure_preset_endpoint }}"
+                  >{{ azure_preset_label }}</button>
+                  {% endif %}
+                </div>
+              </form>
+
+              <details class="compare-reference" id="compare-reference">
+                <summary>Referenztext (optional, für CER/WER)</summary>
+                <div class="compare-reference-body">
+                  <p class="compare-reference-hint">
+                    Liefere echten Text als Ground Truth, um CER, WER und Token-F1 zu
+                    berechnen. Bei digitalen PDFs wird der eingebettete Textlayer
+                    automatisch übernommen – per Häkchen ignorierbar, falls er
+                    unleserlich ist. Die Werte erscheinen im Tab „Metriken“.
+                  </p>
+                  <div class="compare-reference-row">
+                    <span
+                      class="compare-reference-badge hidden"
+                      id="reference-source-badge"
+                    >Aus PDF entnommen</span>
+                    <label class="compare-reference-checkbox hidden" id="reference-ignore-wrap">
+                      <input type="checkbox" id="reference-ignore-embedded" />
+                      Eingebetteten Text ignorieren
+                    </label>
+                  </div>
+                  <textarea
+                    id="reference-text"
+                    rows="6"
+                    placeholder="Referenztext hier einfügen oder .txt-Datei hochladen…"
+                  ></textarea>
+                  <div class="compare-reference-row">
+                    <label class="compare-reference-upload">
+                      <input type="file" id="reference-file" accept=".txt,text/plain" />
+                      <span>.txt hochladen</span>
+                    </label>
+                    <button type="button" class="compare-reference-clear" id="reference-clear-btn">Leeren</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </details>
         </section>
 
         <section id="metrics-wrap" class="hidden">
