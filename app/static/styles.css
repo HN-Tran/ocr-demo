@@ -424,7 +424,7 @@ button:disabled {
 #preview-image.preview-image {
   display: block;
   max-width: 100%;
-  max-height: min(58vh, 760px);
+  max-height: min(82vh, 1100px);
   width: auto;
   height: auto;
   border-radius: 6px;
@@ -1720,7 +1720,7 @@ body.is-loading {
 @media (min-width: 1060px) {
   .page {
     padding: 1.6rem;
-    grid-template-columns: minmax(460px, 1.15fr) minmax(420px, 1fr);
+    grid-template-columns: minmax(520px, 1.6fr) minmax(380px, 1fr);
     align-items: start;
   }
 

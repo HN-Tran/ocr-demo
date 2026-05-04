@@ -1359,14 +1359,39 @@ async def health() -> dict:
     }
 
 
+_VISION_CAP_CACHE: dict[str, bool] = {}
+
+
+async def _filter_vision_models(client: OllamaClient, names: list[str]) -> list[str]:
+    """Behalte nur Modelle, die von Ollama als ``vision``-fähig gemeldet werden.
+
+    Cached pro Prozess, weil ``/api/show`` pro Modell ~100 ms kostet. Modelle,
+    deren Show-Aufruf fehlschlägt, werden konservativ rausgefiltert (lieber
+    weniger als falsche Auswahl).
+    """
+    pending = [n for n in names if n not in _VISION_CAP_CACHE]
+    for name in pending:
+        try:
+            caps = await client.model_capabilities(name)
+            _VISION_CAP_CACHE[name] = "vision" in caps
+        except OllamaError:
+            _VISION_CAP_CACHE[name] = False
+    return [n for n in names if _VISION_CAP_CACHE.get(n, False)]
+
+
 @router.get("/models")
-async def models(client: OllamaClient = Depends(get_ollama_client)) -> dict:
+async def models(
+    vision_only: bool = False,
+    client: OllamaClient = Depends(get_ollama_client),
+) -> dict:
     try:
         model_names = await client.list_models()
     except OllamaError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
+    if vision_only:
+        model_names = await _filter_vision_models(client, model_names)
     return {"models": model_names}
 
 
@@ -1376,13 +1401,13 @@ async def schemas() -> dict:
 
 
 @router.get("/peer-models")
-async def peer_models(url: str) -> dict[str, object]:
+async def peer_models(url: str, vision_only: bool = True) -> dict[str, object]:
     """Proxy: ``GET <peer>/api/models`` für die Self-Peer-Modellauswahl.
 
-    Läuft serverseitig, um CORS zu umgehen. Liefert ``{"models": [...]}`` bei
-    Erfolg. Antwortet 502, wenn der Peer nicht erreichbar ist oder keine
-    erwartete Form liefert — das Frontend fällt dann auf ein freies
-    Eingabefeld zurück.
+    Läuft serverseitig, um CORS zu umgehen. ``vision_only`` (Standard True)
+    wird an den Peer durchgereicht, sodass nur vision-fähige Modelle in der
+    Auswahl landen. Antwortet 502, wenn der Peer nicht erreichbar ist —
+    das Frontend fällt dann auf ein freies Eingabefeld zurück.
     """
     target = url.strip().rstrip("/")
     if not target.startswith(("http://", "https://")):
@@ -1390,9 +1415,10 @@ async def peer_models(url: str) -> dict[str, object]:
             status_code=status.HTTP_400_BAD_REQUEST, detail="URL muss mit http(s):// beginnen."
         )
     settings = get_settings()
+    params = {"vision_only": "true" if vision_only else "false"}
     try:
         async with httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl) as client:
-            resp = await client.get(f"{target}/api/models")
+            resp = await client.get(f"{target}/api/models", params=params)
             resp.raise_for_status()
             payload = resp.json()
     except (httpx.HTTPError, ValueError) as exc:

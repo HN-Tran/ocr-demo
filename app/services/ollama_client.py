@@ -26,6 +26,21 @@ class OllamaClient:
         models = payload.get("models", [])
         return [entry.get("name", "") for entry in models if entry.get("name")]
 
+    async def model_capabilities(self, name: str) -> list[str]:
+        """Capabilities-Liste eines Ollama-Modells (z. B. ``["completion", "vision"]``)."""
+        url = f"{self.base_url}/api/show"
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            try:
+                response = await client.post(url, json={"model": name})
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise OllamaError(
+                    f"Capabilities von {name!r} konnten nicht geladen werden: {exc}"
+                ) from exc
+        payload = response.json()
+        caps = payload.get("capabilities", [])
+        return [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else []
+
     async def run_ocr(
         self,
         *,

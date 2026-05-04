@@ -932,6 +932,10 @@ function applyWordMode(active, layoutPages) {
     renderWordOverlay(annotatedWords);
     renderWordSidebar(annotatedWords, regions);
   } else {
+    // Wort-Overlay verlassen: Layout-Polygone wieder einblenden, Word-SVG entfernen.
+    // Sichtbarkeit der Sidebar-Section gehört der Tab-Logik (setActiveResultView) —
+    // hier NICHT renderLayoutPanel aufrufen, sonst hängt der Layout-Block auf
+    // Markdown/Vergleich-Tabs.
     layoutSvgEls.forEach((el) => el.classList.remove("hidden"));
     layoutBoxEls.forEach((el) => el.classList.remove("hidden"));
 
@@ -939,7 +943,6 @@ function applyWordMode(active, layoutPages) {
     if (existing) existing.remove();
 
     const lp = layoutPages || normalizeLayoutPages(lastResponse?.layout);
-    renderLayoutPanel(lp, lastResponse?.layout_visualizations, currentPageIndex);
     if (layoutBoxEls.length === 0 && lp.length > 0) {
       renderLayoutOverlay(lp, currentPageIndex);
     } else {
@@ -2504,7 +2507,7 @@ function _showEngineFields(name) {
   }
 }
 
-const _modelsEndpoint = `${appBasePath}/api/models`;
+const _modelsEndpoint = `${appBasePath}/api/models?vision_only=true`;
 const _peerModelsEndpoint = `${appBasePath}/api/peer-models`;
 const _defaultModelName = (document.body?.dataset.defaultModel || "").trim();
 let _localModelsCache = null;
