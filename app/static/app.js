@@ -64,12 +64,27 @@ const comparePresetBtn = document.getElementById("compare-preset-btn");
 const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
 const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
+const referenceTextEl = document.getElementById("reference-text");
+const referenceFileEl = document.getElementById("reference-file");
+const referenceClearBtnEl = document.getElementById("reference-clear-btn");
+const referenceIgnoreEmbeddedEl = document.getElementById("reference-ignore-embedded");
+const referenceIgnoreWrapEl = document.getElementById("reference-ignore-wrap");
+const referenceSourceBadgeEl = document.getElementById("reference-source-badge");
+const compareReferenceEl = document.getElementById("compare-reference");
+const metricsPanelEl = document.getElementById("metrics-panel");
+const metricsContentEl = document.getElementById("metrics-content");
+const metricsTabBtns = Array.from(document.querySelectorAll("[data-metrics-tab]"));
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
 const compareEndpoint = `${appBasePath}/api/compare`;
+const extractPdfTextEndpoint = `${appBasePath}/api/extract-pdf-text`;
 
 let lastResponse = null;
 let lastDiff = null;
+let lastMetrics = null;
+let activeMetricsTab = "intrinsic";
+let embeddedReferenceText = "";  // text extracted from PDF text-layer, if any
+let manualReferenceText = "";    // text the user pasted/uploaded; wins when present
 let lastTableMatrices = [];
 let previewUrl = null;
 let activeRequestController = null;
@@ -203,6 +218,8 @@ function setAdvancedDirty(isDirty) {
 function clearOutput() {
   outputEl.textContent = "";
   lastDiff = null;
+  lastMetrics = null;
+  renderMetricsPanel(null);
   clearMarkdownPreview();
   clearDiffPanel();
   clearResultViewSwitch();
@@ -1844,6 +1861,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
 
 function applyCompareResponse(data) {
   lastDiff = data?.diff || null;
+  lastMetrics = data?.metrics || null;
   const pageCount = Array.isArray(lastDiff?.pages) ? lastDiff.pages.length : 0;
   const matchedTotal = lastDiff?.matched_count ?? 0;
   const mismatchedTotal = lastDiff?.mismatched_count ?? 0;
@@ -1859,10 +1877,272 @@ function applyCompareResponse(data) {
     `<span class="compare-total-hint">${pageLabel}</span>`;
   compareSummaryEl.classList.remove("hidden");
 
+  renderMetricsPanel(lastMetrics);
+
   if (resultViewDiffBtnEl && !resultViewDiffBtnEl.classList.contains("hidden")) {
     resultViewDiffBtnEl.click();
   }
 }
+
+function _fmtNumber(value, { digits = 3, percent = false } = {}) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (percent) return `${(value * 100).toFixed(digits === 3 ? 1 : digits)} %`;
+  return value.toFixed(digits);
+}
+
+function _metricRow(label, valueOurs, valueTheirs, { tooltip } = {}) {
+  const helpHtml = tooltip
+    ? ` <span class="metric-help" title="${escapeHtml(tooltip)}">ⓘ</span>`
+    : "";
+  const cell = (value) => {
+    if (value === null || value === undefined) {
+      return `<td class="metric-empty">—</td>`;
+    }
+    return `<td class="metric-value">${escapeHtml(String(value))}</td>`;
+  };
+  return `<tr><th>${escapeHtml(label)}${helpHtml}</th>${cell(valueOurs)}${cell(valueTheirs)}</tr>`;
+}
+
+function _renderIntrinsicTab(intrinsic) {
+  if (!intrinsic) return `<p class="compare-reference-hint">Keine Daten.</p>`;
+  const ours = intrinsic.ours || {};
+  const theirs = intrinsic.theirs || {};
+  const fmtConf = (v) => _fmtNumber(v, { digits: 3 });
+  const fmtMs = (v) => (typeof v === "number" ? `${v} ms` : null);
+  const rows = [
+    _metricRow("Tokens", ours.tokens ?? null, theirs.tokens ?? null),
+    _metricRow("Zeichen", ours.chars ?? null, theirs.chars ?? null),
+    _metricRow("Word-Boxen", ours.word_box_count ?? null, theirs.word_box_count ?? null),
+    _metricRow(
+      "Ø Konfidenz",
+      fmtConf(ours.avg_confidence),
+      fmtConf(theirs.avg_confidence),
+      {
+        tooltip:
+          "Durchschnittliche Konfidenz pro Wort, sofern die Engine sie liefert. Nicht zwischen Engines vergleichbar (unterschiedliche Kalibrierung).",
+      },
+    ),
+    _metricRow("Latenz", fmtMs(ours.latency_ms), fmtMs(theirs.latency_ms)),
+  ];
+  return `
+    <table class="metrics-table">
+      <thead><tr><th>Metrik</th><th>Wir</th><th>Andere</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  `;
+}
+
+function _renderComparisonTab(comparison) {
+  if (!comparison) return `<p class="compare-reference-hint">Keine Daten.</p>`;
+  const fmt = (v) => _fmtNumber(v, { digits: 3 });
+  const fmtPct = (v) => _fmtNumber(v, { percent: true });
+  return `
+    <p class="metrics-section-title">Symmetrische Abweichung</p>
+    <table class="metrics-table">
+      <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
+      <tbody>
+        ${_singleMetricRow(
+          "Δ Zeichen",
+          fmt(comparison.delta_char),
+          "Normalisierte Levenshtein-Distanz auf Zeichenbasis (0 = identisch, 1 = komplett verschieden). Nicht CER — beide Seiten sind Hypothesen.",
+        )}
+        ${_singleMetricRow(
+          "Δ Wörter",
+          fmt(comparison.delta_word),
+          "Normalisierte Levenshtein-Distanz auf Wortbasis. Nicht WER — beide Seiten sind Hypothesen.",
+        )}
+        ${_singleMetricRow(
+          "Token-Jaccard",
+          fmt(comparison.token_jaccard),
+          "|A ∩ B| / |A ∪ B|, ordnungsunabhängig. Höher = mehr gemeinsame Tokens.",
+        )}
+      </tbody>
+    </table>
+    <p class="metrics-section-title">Asymmetrisch (Andere ≙ Referenz)</p>
+    <table class="metrics-table">
+      <thead><tr><th>Metrik</th><th>Wir vs Andere</th></tr></thead>
+      <tbody>
+        ${_singleMetricRow(
+          "Token-Precision",
+          fmtPct(comparison.token_precision),
+          "Anteil unserer Tokens, die auch die andere Engine liefert (Anti-Halluzination).",
+        )}
+        ${_singleMetricRow(
+          "Token-Recall",
+          fmtPct(comparison.token_recall),
+          "Anteil der Tokens der anderen Engine, die wir auch produzieren (Coverage).",
+        )}
+        ${_singleMetricRow("Token-F1", fmtPct(comparison.token_f1))}
+      </tbody>
+    </table>
+  `;
+}
+
+function _singleMetricRow(label, value, tooltip) {
+  const helpHtml = tooltip
+    ? ` <span class="metric-help" title="${escapeHtml(tooltip)}">ⓘ</span>`
+    : "";
+  if (value === null || value === undefined) {
+    return `<tr><th>${escapeHtml(label)}${helpHtml}</th><td class="metric-empty">—</td></tr>`;
+  }
+  return `<tr><th>${escapeHtml(label)}${helpHtml}</th><td class="metric-value">${escapeHtml(String(value))}</td></tr>`;
+}
+
+function _renderReferenceTab(reference) {
+  if (!reference) {
+    return `<p class="compare-reference-hint">Kein Referenztext geliefert. Im Bereich „Referenztext" oben einfügen oder eine .txt hochladen.</p>`;
+  }
+  const ours = reference.ours || {};
+  const theirs = reference.theirs || {};
+  const fmt = (v) => _fmtNumber(v, { digits: 3 });
+  const fmtPct = (v) => _fmtNumber(v, { percent: true });
+  const rows = [
+    _metricRow("CER", fmt(ours.cer), fmt(theirs.cer), {
+      tooltip: "Character Error Rate: Levenshtein(Referenz, Hypothese) / |Referenz|. Niedriger = besser.",
+    }),
+    _metricRow("WER", fmt(ours.wer), fmt(theirs.wer), {
+      tooltip: "Word Error Rate: Levenshtein auf Wortbasis / |Referenz-Wörter|. Niedriger = besser.",
+    }),
+    _metricRow("Token-Precision", fmtPct(ours.token_precision), fmtPct(theirs.token_precision)),
+    _metricRow("Token-Recall", fmtPct(ours.token_recall), fmtPct(theirs.token_recall)),
+    _metricRow("Token-F1", fmtPct(ours.token_f1), fmtPct(theirs.token_f1)),
+  ];
+  return `
+    <p class="metrics-section-title">Referenz: ${reference.token_count ?? "?"} Tokens, ${reference.char_count ?? "?"} Zeichen</p>
+    <table class="metrics-table">
+      <thead><tr><th>Metrik</th><th>Wir</th><th>Andere</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  `;
+}
+
+function renderMetricsPanel(metrics) {
+  if (!metrics) {
+    metricsPanelEl?.classList.add("hidden");
+    if (metricsContentEl) metricsContentEl.innerHTML = "";
+    return;
+  }
+  metricsPanelEl?.classList.remove("hidden");
+  const refTab = metricsTabBtns.find((b) => b.dataset.metricsTab === "reference");
+  if (refTab) {
+    if (metrics.reference) {
+      refTab.removeAttribute("disabled");
+      refTab.removeAttribute("title");
+    } else {
+      refTab.setAttribute("disabled", "");
+      refTab.setAttribute("title", "Erfordert Referenztext");
+      if (activeMetricsTab === "reference") activeMetricsTab = "intrinsic";
+    }
+  }
+  _renderActiveMetricsTab();
+}
+
+function _renderActiveMetricsTab() {
+  if (!metricsContentEl || !lastMetrics) return;
+  let html = "";
+  if (activeMetricsTab === "intrinsic") html = _renderIntrinsicTab(lastMetrics.intrinsic);
+  else if (activeMetricsTab === "comparison") html = _renderComparisonTab(lastMetrics.comparison);
+  else if (activeMetricsTab === "reference") html = _renderReferenceTab(lastMetrics.reference);
+  metricsContentEl.innerHTML = html;
+  metricsTabBtns.forEach((btn) => {
+    const active = btn.dataset.metricsTab === activeMetricsTab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+}
+
+metricsTabBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.hasAttribute("disabled")) return;
+    activeMetricsTab = btn.dataset.metricsTab;
+    _renderActiveMetricsTab();
+  });
+});
+
+function effectiveReferenceText() {
+  if (manualReferenceText && manualReferenceText.trim()) return manualReferenceText;
+  if (referenceIgnoreEmbeddedEl?.checked) return "";
+  return embeddedReferenceText || "";
+}
+
+function _syncReferenceTextarea() {
+  if (!referenceTextEl) return;
+  if (manualReferenceText && manualReferenceText.trim()) {
+    referenceTextEl.value = manualReferenceText;
+  } else if (embeddedReferenceText && !referenceIgnoreEmbeddedEl?.checked) {
+    referenceTextEl.value = embeddedReferenceText;
+  } else {
+    referenceTextEl.value = "";
+  }
+}
+
+function _setEmbeddedReference(text) {
+  embeddedReferenceText = text || "";
+  if (embeddedReferenceText) {
+    referenceSourceBadgeEl?.classList.remove("hidden");
+    referenceIgnoreWrapEl?.classList.remove("hidden");
+    if (compareReferenceEl && !compareReferenceEl.open) compareReferenceEl.open = true;
+  } else {
+    referenceSourceBadgeEl?.classList.add("hidden");
+    referenceIgnoreWrapEl?.classList.add("hidden");
+    if (referenceIgnoreEmbeddedEl) referenceIgnoreEmbeddedEl.checked = false;
+  }
+  _syncReferenceTextarea();
+}
+
+async function maybeFetchEmbeddedPdfReference(file) {
+  _setEmbeddedReference("");
+  if (!file || file.type !== "application/pdf") return;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const resp = await fetch(extractPdfTextEndpoint, { method: "POST", body: fd });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data?.has_text_layer && data.text) {
+      _setEmbeddedReference(String(data.text));
+      if (typeof data.garbage_ratio === "number" && data.garbage_ratio > 0.3) {
+        // Soft warning baked into the badge title; user can decide.
+        referenceSourceBadgeEl?.setAttribute(
+          "title",
+          `Heuristik meldet ${Math.round(data.garbage_ratio * 100)} % unleserliche Zeichen — eventuell ignorieren.`,
+        );
+      } else {
+        referenceSourceBadgeEl?.removeAttribute("title");
+      }
+    }
+  } catch {
+    /* network error → silent: user can still paste manually */
+  }
+}
+
+referenceTextEl?.addEventListener("input", () => {
+  manualReferenceText = referenceTextEl.value;
+});
+
+referenceClearBtnEl?.addEventListener("click", () => {
+  manualReferenceText = "";
+  if (referenceTextEl) referenceTextEl.value = "";
+  if (embeddedReferenceText && !referenceIgnoreEmbeddedEl?.checked) {
+    _syncReferenceTextarea();
+  }
+});
+
+referenceFileEl?.addEventListener("change", async () => {
+  const file = referenceFileEl.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    manualReferenceText = text;
+    if (referenceTextEl) referenceTextEl.value = text;
+  } catch {
+    /* ignore */
+  }
+  referenceFileEl.value = "";
+});
+
+referenceIgnoreEmbeddedEl?.addEventListener("change", _syncReferenceTextarea);
 
 async function runOCR() {
   const selectedFile = currentFile();
@@ -2034,6 +2314,7 @@ window.addEventListener("drop", (event) => {
 fileEl.addEventListener("change", () => {
   setWorkspaceVisible(!!currentFile());
   updatePreview();
+  void maybeFetchEmbeddedPdfReference(currentFile());
   void runOCR();
 });
 previewImageEl.addEventListener("load", () => {
@@ -2158,6 +2439,8 @@ compareFormEl.addEventListener("submit", async (event) => {
   compareSummaryEl.textContent = "Vergleich läuft…";
   compareSummaryEl.classList.remove("hidden");
   lastDiff = null;
+  lastMetrics = null;
+  renderMetricsPanel(null);
   clearDiffPanel();
   renderDiffOverlay(null);
 
@@ -2200,6 +2483,10 @@ compareFormEl.addEventListener("submit", async (event) => {
     document.getElementById("expert_compare_include_detector_only")?.value,
     { bool: true },
   );
+  const refText = effectiveReferenceText();
+  if (refText && refText.trim()) {
+    fd.append("reference_text", refText);
+  }
   if (!fd.has("expert_enable_layout") && lastResponse?.analyzeResult?.pages?.[0]) {
     fd.append("expert_enable_layout", "true");
   }
@@ -2246,6 +2533,7 @@ async function _loadExampleFile(slot) {
   fileEl.files = transfer.files;
   setWorkspaceVisible(true);
   updatePreview();
+  void maybeFetchEmbeddedPdfReference(file);
 }
 
 async function runExample(slot) {

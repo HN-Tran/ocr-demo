@@ -32,6 +32,8 @@ from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.compare_metrics import compute as compute_compare_metrics
+from app.services.ocr_pipeline import OCRResult
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
@@ -97,8 +99,8 @@ def _sniff_content_type(payload: bytes) -> str | None:
 
 def _resolve_effective_content_type(content_type: str | None, payload: bytes) -> str:
     normalized = _normalize_content_type(content_type)
-    if normalized in ALLOWED_MIME_TYPES:
-        return cast(str, normalized)
+    if normalized is not None and normalized in ALLOWED_MIME_TYPES:
+        return normalized
     if normalized in {None, "application/octet-stream"}:
         sniffed = _sniff_content_type(payload)
         if sniffed is not None:
@@ -791,8 +793,8 @@ def _build_document_projection(
     for page_context, page_offset in zip(page_contexts, offsets, strict=False):
         page_index = cast(int, page_context["page_index"])
         page_number = cast(int, page_context["page_number"])
-        page_info = page_context["page_info"]
-        page_layout = page_context["page_layout"]
+        page_info = cast(dict[str, object], page_context["page_info"])
+        page_layout = cast("dict[str, object] | None", page_context["page_layout"])
         page_content = cast(str, page_context["page_content"])
 
         page_entry = _page_entry_base(page_info, page_index)
@@ -843,7 +845,14 @@ def _build_tables(
     for page_idx, page in enumerate(layout):
         if not isinstance(page, dict):
             continue
-        page_number = int(page.get("page_number", page_idx + 1) or page_idx + 1)
+        raw_page_number = page.get("page_number", page_idx + 1)
+        if isinstance(raw_page_number, (int, float, str)):
+            try:
+                page_number = int(raw_page_number) or page_idx + 1
+            except (TypeError, ValueError):
+                page_number = page_idx + 1
+        else:
+            page_number = page_idx + 1
         regions = page.get("regions")
         if not isinstance(regions, list):
             continue
@@ -1388,6 +1397,29 @@ async def get_example_cached(slot: int, request: Request) -> dict[str, object]:
     }
 
 
+@router.post("/extract-pdf-text")
+async def extract_pdf_text(
+    request: Request,
+    file: UploadFile | None = File(None),
+) -> dict[str, object]:
+    """Eingebetteten Text aus einer PDF lesen — fürs Vorbefüllen der Referenz."""
+    from app.services.pdf_text import extract as _extract_pdf_text
+
+    if file is not None:
+        image_bytes = await file.read()
+    else:
+        image_bytes = await request.body()
+    if not image_bytes:
+        return {"text": "", "page_count": 0, "has_text_layer": False, "garbage_ratio": 0.0}
+    extraction = _extract_pdf_text(image_bytes)
+    return {
+        "text": extraction.text,
+        "page_count": extraction.page_count,
+        "has_text_layer": extraction.has_text_layer,
+        "garbage_ratio": extraction.garbage_ratio,
+    }
+
+
 @router.post("/ocr")
 async def ocr(
     request: Request,
@@ -1927,41 +1959,52 @@ async def _execute_compare_against_azure(
     expert_text_anchor: bool | None = None,
     expert_text_anchor_threshold: float | None = None,
     expert_word_detector: str | None = None,
+    reference_text: str | None = None,
 ) -> dict[str, object]:
     """Run our-OCR + Azure OCR concurrently and build the compare response.
 
     Shared between the /api/compare endpoint and the example warmer. Raises
     on failure (callers translate to HTTPException or log + skip).
     """
+
+    async def _timed(coro: object) -> tuple[object, int]:
+        started = time.perf_counter()
+        result = await coro  # type: ignore[misc]
+        return result, int((time.perf_counter() - started) * 1000)
+
     our_task = asyncio.create_task(
-        pipeline.run(
-            backend=backend,
-            image_bytes=image_bytes,
-            content_type=content_type,
-            mode="plain",
-            schema_name=None,
-            model=None,
-            task="ocr_text",
-            custom_prompt=None,
-            token_limit=None,
-            gif_max_frames=None,
-            expert_enable_layout=expert_enable_layout,
-            expert_layout_model=expert_layout_model,
-            expert_layout_threshold=expert_layout_threshold,
-            expert_table_transformer=expert_table_transformer,
-            expert_per_region_ocr=expert_per_region_ocr,
-            expert_text_anchor=expert_text_anchor,
-            expert_text_anchor_threshold=expert_text_anchor_threshold,
-            expert_word_detector=expert_word_detector,
+        _timed(
+            pipeline.run(
+                backend=backend,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode="plain",
+                schema_name=None,
+                model=None,
+                task="ocr_text",
+                custom_prompt=None,
+                token_limit=None,
+                gif_max_frames=None,
+                expert_enable_layout=expert_enable_layout,
+                expert_layout_model=expert_layout_model,
+                expert_layout_threshold=expert_layout_threshold,
+                expert_table_transformer=expert_table_transformer,
+                expert_per_region_ocr=expert_per_region_ocr,
+                expert_text_anchor=expert_text_anchor,
+                expert_text_anchor_threshold=expert_text_anchor_threshold,
+                expert_word_detector=expert_word_detector,
+            )
         )
     )
     azure_task = asyncio.create_task(
-        _call_azure_read(
-            azure_endpoint,
-            azure_key,
-            image_bytes,
-            content_type,
-            verify_ssl=verify_ssl,
+        _timed(
+            _call_azure_read(
+                azure_endpoint,
+                azure_key,
+                image_bytes,
+                content_type,
+                verify_ssl=verify_ssl,
+            )
         )
     )
     our_outcome, azure_outcome = await asyncio.gather(our_task, azure_task, return_exceptions=True)
@@ -1970,8 +2013,10 @@ async def _execute_compare_against_azure(
     if isinstance(azure_outcome, BaseException):
         raise azure_outcome
 
-    our_result, _ = our_outcome
-    azure_response = azure_outcome
+    (our_result, _selected_backend), our_latency_ms = cast(
+        tuple[tuple[OCRResult, str], int], our_outcome
+    )
+    azure_response, azure_latency_ms = cast(tuple[dict[str, object], int], azure_outcome)
 
     our_analyze = _build_analyze_result(
         content=our_result.text,
@@ -2039,6 +2084,16 @@ async def _execute_compare_against_azure(
         only_ours_total += len(cast(list, page_diff.get("only_ours", [])))
         only_azure_total += len(cast(list, page_diff.get("only_azure", [])))
 
+    metrics = compute_compare_metrics(
+        our_text=our_result.text,
+        our_words_per_page=our_words_per_page,
+        our_latency_ms=our_latency_ms,
+        their_text=azure_text,
+        their_words_per_page=azure_words_per_page,
+        their_latency_ms=azure_latency_ms,
+        reference_text=reference_text,
+    )
+
     return {
         "our_text": our_result.text,
         "azure_text": azure_text,
@@ -2051,6 +2106,7 @@ async def _execute_compare_against_azure(
             "only_ours_count": only_ours_total,
             "only_azure_count": only_azure_total,
         },
+        "metrics": metrics,
         "our_warnings": our_result.warnings,
     }
 
@@ -2071,6 +2127,7 @@ async def compare_with_azure(
     expert_text_anchor_threshold: float | None = Form(None),
     expert_word_detector: str | None = Form(None),
     expert_compare_include_detector_only: bool | None = Form(None),
+    reference_text: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
@@ -2125,11 +2182,10 @@ async def compare_with_azure(
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            reference_text=reference_text,
         )
     except (ValueError, TimeoutError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

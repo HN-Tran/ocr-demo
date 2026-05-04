@@ -493,6 +493,70 @@
             {% endif %}
           </form>
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
+
+          <details class="compare-reference" id="compare-reference">
+            <summary>Referenztext (optional, für CER/WER)</summary>
+            <div class="compare-reference-body">
+              <p class="compare-reference-hint">
+                Liefere echten Text als Ground Truth, um CER, WER und Token-F1 zu
+                berechnen. Bei digitalen PDFs wird der eingebettete Textlayer
+                automatisch übernommen – per Häkchen ignorierbar, falls er
+                unleserlich ist.
+              </p>
+              <div class="compare-reference-row">
+                <span
+                  class="compare-reference-badge hidden"
+                  id="reference-source-badge"
+                >Aus PDF entnommen</span>
+                <label class="compare-reference-checkbox hidden" id="reference-ignore-wrap">
+                  <input type="checkbox" id="reference-ignore-embedded" />
+                  Eingebetteten Text ignorieren
+                </label>
+              </div>
+              <textarea
+                id="reference-text"
+                rows="6"
+                placeholder="Referenztext hier einfügen oder .txt-Datei hochladen…"
+              ></textarea>
+              <div class="compare-reference-row">
+                <label class="compare-reference-upload">
+                  <input type="file" id="reference-file" accept=".txt,text/plain" />
+                  <span>.txt hochladen</span>
+                </label>
+                <button type="button" class="compare-reference-clear" id="reference-clear-btn">Leeren</button>
+              </div>
+            </div>
+          </details>
+
+          <div class="metrics-panel hidden" id="metrics-panel">
+            <div class="metrics-tabs" role="tablist">
+              <button
+                type="button"
+                class="metrics-tab active"
+                data-metrics-tab="intrinsic"
+                role="tab"
+                aria-selected="true"
+              >Intrinsisch</button>
+              <button
+                type="button"
+                class="metrics-tab"
+                data-metrics-tab="comparison"
+                role="tab"
+                aria-selected="false"
+              >Vergleich</button>
+              <button
+                type="button"
+                class="metrics-tab"
+                data-metrics-tab="reference"
+                role="tab"
+                aria-selected="false"
+                disabled
+                title="Erfordert Referenztext"
+              >Referenz</button>
+            </div>
+            <div class="metrics-content" id="metrics-content"></div>
+          </div>
+
           <p class="compare-hint">
             Details zu übereinstimmenden und abweichenden Wörtern erscheinen im Tab
             „Vergleich“. Abweichungen zeigen beide Lesungen nebeneinander – die
