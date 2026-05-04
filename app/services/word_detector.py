@@ -29,7 +29,7 @@ class WordPoly(TypedDict, total=False):
 class WordDetector(Protocol):
     """Detect word/line-level bounding polygons in a page image."""
 
-    def detect(self, image: "Image.Image") -> list[WordPoly]:
+    def detect(self, image: Image.Image) -> list[WordPoly]:
         """Return word polygons with coordinates normalised to 0-1000."""
         ...
 
@@ -62,8 +62,8 @@ def _disable_paddle_mkldnn() -> None:
     """
     # --- Layer A: patch paddlex availability check ---
     try:
-        import paddlex.inference.utils.misc as _pxm  # type: ignore[import-untyped]
-        import paddlex.inference.utils.pp_option as _pxo  # type: ignore[import-untyped]
+        import paddlex.inference.utils.misc as _pxm
+        import paddlex.inference.utils.pp_option as _pxo
 
         _pxm.is_mkldnn_available = lambda: False
         # pp_option imports is_mkldnn_available with `from .misc import …`,
@@ -75,14 +75,14 @@ def _disable_paddle_mkldnn() -> None:
 
     # --- Layer B: redirect Config.enable_mkldnn → disable_mkldnn ---
     try:
-        import paddle.inference as _pi  # type: ignore[import-untyped]
+        import paddle.inference as _pi
 
         if not getattr(_pi.Config, "_mkldnn_redirected", False):
             # Redirect enable_mkldnn to actually call disable_mkldnn.
             _pi.Config.enable_mkldnn = lambda self, *a, **kw: self.disable_mkldnn()
             _pi.Config.enable_mkldnn_bfloat16 = lambda self, *a, **kw: None
             _pi.Config.set_mkldnn_cache_capacity = lambda self, *a, **kw: None
-            _pi.Config._mkldnn_redirected = True  # type: ignore[attr-defined]
+            _pi.Config._mkldnn_redirected = True
             logger.debug("paddle.inference.Config.enable_mkldnn → disable_mkldnn umgeleitet.")
     except Exception as e:  # noqa: BLE001
         logger.debug("paddle.inference.Config-Patch nicht anwendbar: %s", e)
@@ -113,7 +113,7 @@ class PaddleOCRWordDetector:
         _disable_paddle_mkldnn()
 
         try:
-            from paddleocr import PaddleOCR  # type: ignore[import-untyped]
+            from paddleocr import PaddleOCR
         except ImportError as exc:
             raise ImportError(
                 "paddleocr ist nicht installiert. "
@@ -125,8 +125,8 @@ class PaddleOCRWordDetector:
         )
         logger.info("PaddleOCRWordDetector initialisiert.")
 
-    def detect(self, image: "Image.Image") -> list[WordPoly]:
-        import numpy as np  # type: ignore[import-untyped]
+    def detect(self, image: Image.Image) -> list[WordPoly]:
+        import numpy as np
 
         img = image.convert("RGB")
         w, h = img.size
@@ -147,7 +147,9 @@ class PaddleOCRWordDetector:
             else:
                 if hasattr(page, "keys") and hasattr(page, "get"):
                     page_dict = dict(page)
-                elif hasattr(page, "__dict__") and ("dt_polys" in page.__dict__ or "det_polys" in page.__dict__):
+                elif hasattr(page, "__dict__") and (
+                    "dt_polys" in page.__dict__ or "det_polys" in page.__dict__
+                ):
                     page_dict = page.__dict__
                 elif hasattr(page, "json"):
                     if callable(page.json):
@@ -201,20 +203,18 @@ class DocTRWordDetector:
 
     def __init__(self) -> None:
         try:
-            from doctr.models import ocr_predictor  # type: ignore[import-untyped]
+            from doctr.models import ocr_predictor
         except ImportError as exc:
             raise ImportError(
                 "python-doctr ist nicht installiert. "
                 "Installieren Sie es mit: pip install 'python-doctr[torch]'"
             ) from exc
         # assume_straight_pages=False → rotated quadrilateral output
-        self._predictor: Any = ocr_predictor(
-            pretrained=True, assume_straight_pages=False
-        )
+        self._predictor: Any = ocr_predictor(pretrained=True, assume_straight_pages=False)
         logger.info("DocTRWordDetector initialisiert.")
 
-    def detect(self, image: "Image.Image") -> list[WordPoly]:
-        import numpy as np  # type: ignore[import-untyped]
+    def detect(self, image: Image.Image) -> list[WordPoly]:
+        import numpy as np
 
         img_array = np.array(image.convert("RGB"))
         results: list[WordPoly] = []
@@ -239,25 +239,35 @@ class DocTRWordDetector:
                                 x0, y0 = geo[0]
                                 x1, y1 = geo[1]
                                 flat = [
-                                    x0 * 1000, y0 * 1000,
-                                    x1 * 1000, y0 * 1000,
-                                    x1 * 1000, y1 * 1000,
-                                    x0 * 1000, y1 * 1000,
+                                    x0 * 1000,
+                                    y0 * 1000,
+                                    x1 * 1000,
+                                    y0 * 1000,
+                                    x1 * 1000,
+                                    y1 * 1000,
+                                    x0 * 1000,
+                                    y1 * 1000,
                                 ]
                             elif geo.ndim == 1 and geo.shape == (4,):
                                 x0, y0, x1, y1 = geo
                                 flat = [
-                                    x0 * 1000, y0 * 1000,
-                                    x1 * 1000, y0 * 1000,
-                                    x1 * 1000, y1 * 1000,
-                                    x0 * 1000, y1 * 1000,
+                                    x0 * 1000,
+                                    y0 * 1000,
+                                    x1 * 1000,
+                                    y0 * 1000,
+                                    x1 * 1000,
+                                    y1 * 1000,
+                                    x0 * 1000,
+                                    y1 * 1000,
                                 ]
                             else:
                                 continue
                             if len(flat) >= 8:
                                 entry: WordPoly = {
                                     "polygon": flat,
-                                    "confidence": float(word.confidence) if word.confidence is not None else 1.0,
+                                    "confidence": float(word.confidence)
+                                    if word.confidence is not None
+                                    else 1.0,
                                 }
                                 if word.value:
                                     entry["content"] = word.value
@@ -273,15 +283,13 @@ class DocTRWordDetector:
 # ---------------------------------------------------------------------------
 
 
-
-def _pts_to_flat(pts: "Any", img_w: int, img_h: int) -> list[float]:
+def _pts_to_flat(pts: Any, img_w: int, img_h: int) -> list[float]:
     """Convert Nx2 pixel-coord array to flat 0-1000 normalised polygon."""
     flat: list[float] = []
     for pt in pts:
         flat.append(float(pt[0]) / img_w * 1000)
         flat.append(float(pt[1]) / img_h * 1000)
     return flat if len(flat) >= 8 else []
-
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +303,7 @@ def create_word_detector(name: str) -> WordDetector | None:
     """Return a WordDetector instance or None for 'none'."""
     normalized = name.strip().lower()
     if normalized not in _VALID:
-        logger.warning(
-            "Unbekannter OCR_WORD_DETECTOR-Wert %r – verwende 'none'.", name
-        )
+        logger.warning("Unbekannter OCR_WORD_DETECTOR-Wert %r – verwende 'none'.", name)
         return None
     if normalized == "none":
         return None

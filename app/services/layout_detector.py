@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -56,7 +56,7 @@ def _iou(box1: Any, box2: Any) -> float:
     inter_area = max(0, x2_i - x1_i + 1) * max(0, y2_i - y1_i + 1)
     box1_area = (x2 - x1 + 1) * (y2 - y1 + 1)
     box2_area = (x2_p - x1_p + 1) * (y2_p - y1_p + 1)
-    return inter_area / float(box1_area + box2_area - inter_area)
+    return float(inter_area) / float(box1_area + box2_area - inter_area)
 
 
 def _is_contained(box1: Any, box2: Any) -> bool:
@@ -138,7 +138,14 @@ def _unclip_boxes(boxes: Any, unclip_ratio: Any) -> Any:
                 x1, y1, x2, y2 = box[2], box[3], box[4], box[5]
                 w, h = x2 - x1, y2 - y1
                 cx, cy = x1 + w / 2, y1 + h / 2
-                row = [class_id, box[1], cx - w * wr / 2, cy - h * hr / 2, cx + w * wr / 2, cy + h * hr / 2]
+                row = [
+                    class_id,
+                    box[1],
+                    cx - w * wr / 2,
+                    cy - h * hr / 2,
+                    cx + w * wr / 2,
+                    cy + h * hr / 2,
+                ]
                 if len(box) > 6:
                     row.extend(box[6:])
                 expanded.append(row)
@@ -151,7 +158,9 @@ def _unclip_boxes(boxes: Any, unclip_ratio: Any) -> Any:
     cy = boxes[:, 3] + heights / 2
     nw = widths * unclip_ratio[0]
     nh = heights * unclip_ratio[1]
-    result = np.column_stack((boxes[:, 0], boxes[:, 1], cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2))
+    result = np.column_stack(
+        (boxes[:, 0], boxes[:, 1], cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2)
+    )
     if boxes.shape[1] > 6:
         result = np.column_stack((result, boxes[:, 6:]))
     return result
@@ -272,14 +281,16 @@ def _apply_layout_postprocess(
             else:
                 poly[:, 0] = np.clip(poly[:, 0], 0, img_w)
                 poly[:, 1] = np.clip(poly[:, 1], 0, img_h)
-            page.append({
-                "cls_id": cls_id,
-                "label": label_name,
-                "score": score,
-                "coordinate": [int(x1), int(y1), int(x2), int(y2)],
-                "order": int(box_data[6]) if box_data[6] > 0 else None,
-                "polygon_points": poly,
-            })
+            page.append(
+                {
+                    "cls_id": cls_id,
+                    "label": label_name,
+                    "score": score,
+                    "coordinate": [int(x1), int(y1), int(x2), int(y2)],
+                    "order": int(box_data[6]) if box_data[6] > 0 else None,
+                    "polygon_points": poly,
+                }
+            )
         paddle_results.append(page)
 
     return paddle_results
@@ -368,7 +379,7 @@ class HFLayoutDetector:
         results = self._image_processor.post_process_object_detection(
             outputs, threshold=pre_threshold, target_sizes=target
         )
-        return results[0]
+        return cast(dict[str, Any], results[0])
 
     def _post_process_chunk(
         self,
@@ -378,8 +389,11 @@ class HFLayoutDetector:
         pre_threshold: float,
     ) -> list[dict[str, Any]]:
         try:
-            return self._image_processor.post_process_object_detection(
-                outputs, threshold=pre_threshold, target_sizes=target_sizes
+            return cast(
+                list[dict[str, Any]],
+                self._image_processor.post_process_object_detection(
+                    outputs, threshold=pre_threshold, target_sizes=target_sizes
+                ),
             )
         except Exception as exc:
             logger.warning("Batch post_process failed, retrying per-image: %s", exc)
@@ -492,7 +506,7 @@ class HFLayoutDetector:
             img_sizes = [img.size for img in chunk_pil]
             paddle_results = _apply_layout_postprocess(
                 raw_results=raw_results,
-                id2label=self.id2label,
+                id2label=self.id2label or {},
                 img_sizes=img_sizes,
                 layout_nms=self.layout_nms,
                 layout_unclip_ratio=self.layout_unclip_ratio,

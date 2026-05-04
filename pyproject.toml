@@ -75,3 +75,18 @@ warn_unused_ignores = true
 warn_return_any = true
 pretty = true
 exclude = ["data/"]
+
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = [
+    "doctr",
+    "doctr.*",
+    "paddleocr",
+    "paddleocr.*",
+    "paddle",
+    "paddle.*",
+    "paddlex",
+    "paddlex.*",
+]
+ignore_missing_imports = true

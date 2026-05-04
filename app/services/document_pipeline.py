@@ -38,13 +38,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _IMAGE_LABELS = {
-    "figure", "figure_caption", "image", "picture", "illustration",
-    "chart", "seal", "signature", "stamp", "barcode", "qr_code", "Picture",
+    "figure",
+    "figure_caption",
+    "image",
+    "picture",
+    "illustration",
+    "chart",
+    "seal",
+    "signature",
+    "stamp",
+    "barcode",
+    "qr_code",
+    "Picture",
 }
 _TABLE_LABELS = {"table", "table_title", "table_caption", "table_footnote", "Table"}
 _FORMULA_LABELS = {
-    "formula", "formula_caption", "formula_number",
-    "equation_footnote", "isolate_formula", "Formula",
+    "formula",
+    "formula_caption",
+    "formula_number",
+    "equation_footnote",
+    "isolate_formula",
+    "Formula",
 }
 
 
@@ -144,14 +158,16 @@ def _build_table_cells(
             cy1 = ry1 + r_idx * row_h
             cx2 = rx1 + (c_idx + 1) * col_w
             cy2 = ry1 + (r_idx + 1) * row_h
-            cells.append({
-                "row": r_idx,
-                "column": c_idx,
-                "content": content,
-                "bbox_2d": [cx1, cy1, cx2, cy2],
-                "polygon": [cx1, cy1, cx2, cy1, cx2, cy2, cx1, cy2],
-                "is_header": r_idx == 0,
-            })
+            cells.append(
+                {
+                    "row": r_idx,
+                    "column": c_idx,
+                    "content": content,
+                    "bbox_2d": [cx1, cy1, cx2, cy2],
+                    "polygon": [cx1, cy1, cx2, cy1, cx2, cy2, cx1, cy2],
+                    "is_header": r_idx == 0,
+                }
+            )
     return cells
 
 
@@ -175,7 +191,10 @@ def _sort_reading_order(regions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         y_center = (bbox[1] + bbox[3]) / 2
         if not current_band or abs(y_center - band_y) <= tolerance:
             current_band.append(region)
-            band_y = sum((r.get("bbox_2d", [0, 0, 0, 0])[1] + r.get("bbox_2d", [0, 0, 0, 0])[3]) / 2 for r in current_band) / len(current_band)
+            band_y = sum(
+                (r.get("bbox_2d", [0, 0, 0, 0])[1] + r.get("bbox_2d", [0, 0, 0, 0])[3]) / 2
+                for r in current_band
+            ) / len(current_band)
         else:
             bands.append(sorted(current_band, key=lambda r: r.get("bbox_2d", [0, 0, 0, 0])[0]))
             current_band = [region]
@@ -207,15 +226,14 @@ def _match_to_source_text(
     if not candidate or not source_text:
         return candidate
 
-    lines = [l for l in source_text.splitlines() if l.strip()]
+    lines = [ln for ln in source_text.splitlines() if ln.strip()]
     if not lines:
         return candidate
 
-    candidate_lines_list = [l for l in candidate.splitlines() if l.strip()]
+    candidate_lines_list = [ln for ln in candidate.splitlines() if ln.strip()]
     if not candidate_lines_list:
         return candidate
     first_line = candidate_lines_list[0]
-    last_line = candidate_lines_list[-1]
 
     # Find the line in source_text where the first candidate line matches best.
     best_start_score = 0.0
@@ -273,11 +291,13 @@ def _remap_cells_to_page_coords(
         py1 = ry1 + (cy1 / crop_h) * rh
         px2 = rx1 + (cx2 / crop_w) * rw
         py2 = ry1 + (cy2 / crop_h) * rh
-        remapped.append({
-            **cell,
-            "bbox_2d": [px1, py1, px2, py2],
-            "polygon": [px1, py1, px2, py1, px2, py2, px1, py2],
-        })
+        remapped.append(
+            {
+                **cell,
+                "bbox_2d": [px1, py1, px2, py2],
+                "polygon": [px1, py1, px2, py1, px2, py2, px1, py2],
+            }
+        )
     return remapped
 
 
@@ -352,10 +372,7 @@ def _assign_word_content(
     for r_idx, indices in region_poly_indices.items():
         region_content = str(regions[r_idx].get("content") or "")
         flat_tokens = [
-            t
-            for line in region_content.splitlines()
-            if line.strip()
-            for t in line.split()
+            t for line in region_content.splitlines() if line.strip() for t in line.split()
         ]
         if not flat_tokens:
             continue
@@ -377,10 +394,7 @@ def _assign_word_content(
                     if score > best_score:
                         best_score = score
                         best_token_idx = token_idx
-                if (
-                    best_token_idx is not None
-                    and best_score >= _WORD_CONTENT_SIMILARITY_THRESHOLD
-                ):
+                if best_token_idx is not None and best_score >= _WORD_CONTENT_SIMILARITY_THRESHOLD:
                     result[poly_idx]["content"] = flat_tokens[best_token_idx]
                     used_tokens.add(best_token_idx)
                 # else: keep detector text — region OCR didn't catch this word.
@@ -653,9 +667,7 @@ class DocumentPipeline:
             else expert_table_transformer
         )
         selected_per_region_ocr = (
-            self.enable_per_region_ocr
-            if expert_per_region_ocr is None
-            else expert_per_region_ocr
+            self.enable_per_region_ocr if expert_per_region_ocr is None else expert_per_region_ocr
         )
         selected_text_anchor = (
             self.enable_text_anchor if expert_text_anchor is None else expert_text_anchor
@@ -684,36 +696,56 @@ class DocumentPipeline:
         if mode != "plain":
             return await self._fallback(
                 reason="Document-Pipeline unterstützt derzeit nur mode=plain; direkte Pipeline wurde verwendet.",
-                image_bytes=image_bytes, content_type=content_type, mode=mode,
-                schema_name=schema_name, model=model, task=task,
-                custom_prompt=custom_prompt, token_limit=token_limit,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                model=model,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
             )
 
         if selected_task != PLAIN_TASK_OCR_TEXT or (custom_prompt and custom_prompt.strip()):
             return await self._fallback(
                 reason="Document-Pipeline unterstützt derzeit nur ocr_text ohne custom_prompt; direkte Pipeline wurde verwendet.",
-                image_bytes=image_bytes, content_type=content_type, mode=mode,
-                schema_name=schema_name, model=model, task=task,
-                custom_prompt=custom_prompt, token_limit=token_limit,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                model=model,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
             )
 
         if content_type == "image/gif":
             return await self._fallback(
                 reason="GIF-Verarbeitung bleibt in der direkten Pipeline.",
-                image_bytes=image_bytes, content_type=content_type, mode=mode,
-                schema_name=schema_name, model=model, task=task,
-                custom_prompt=custom_prompt, token_limit=token_limit,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                model=model,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
             )
 
         if not selected_enable_layout:
             return await self._fallback(
                 reason="Layout deaktiviert; direkte Pipeline wurde verwendet.",
-                image_bytes=image_bytes, content_type=content_type, mode=mode,
-                schema_name=schema_name, model=model, task=task,
-                custom_prompt=custom_prompt, token_limit=token_limit,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                model=model,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
                 gif_max_frames=gif_max_frames,
             )
 
@@ -756,44 +788,42 @@ class DocumentPipeline:
             )
             if selected_word_detector is not None:
                 try:
-                    word_polys = await asyncio.to_thread(
-                        selected_word_detector.detect, page_image
-                    )
+                    word_polys = await asyncio.to_thread(selected_word_detector.detect, page_image)
                     # Detector-provided text (DocTR / PaddleOCR per-word
                     # recognition) is preserved as a fallback. Per-region
                     # OCR tokens are mapped onto the polygons in reading
                     # order inside _assign_word_content and override the
                     # detector text where they cover.
                     page_layout["word_polys"] = _assign_word_content(
-                        word_polys, cast(list, page_layout.get("regions", []))
+                        cast(list[dict[str, Any]], word_polys),
+                        cast(list[dict[str, Any]], page_layout.get("regions", [])),
                     )
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"Wort-Erkennung fehlgeschlagen: {exc}")
             layout.append(page_layout)
             all_page_texts.append(page_text)
             warnings.extend(
-                f"Seite {page_number}: {w}" if len(pages) > 1 else w
-                for w in page_warnings
+                f"Seite {page_number}: {w}" if len(pages) > 1 else w for w in page_warnings
             )
-            page_infos.append({
-                "page_number": page_number,
-                "angle": 0.0,
-                "width": page_image.width,
-                "height": page_image.height,
-                "unit": "pixel",
-                "kind": "document",
-                "words": [],
-                "lines": [],
-                "spans": [],
-            })
+            page_infos.append(
+                {
+                    "page_number": page_number,
+                    "angle": 0.0,
+                    "width": page_image.width,
+                    "height": page_image.height,
+                    "unit": "pixel",
+                    "kind": "document",
+                    "words": [],
+                    "lines": [],
+                    "spans": [],
+                }
+            )
 
         # Assemble result
         if len(all_page_texts) <= 1:
             text = all_page_texts[0] if all_page_texts else ""
         else:
-            text = "\n\n".join(
-                f"--- Seite {i + 1} ---\n{t}" for i, t in enumerate(all_page_texts)
-            )
+            text = "\n\n".join(f"--- Seite {i + 1} ---\n{t}" for i, t in enumerate(all_page_texts))
 
         region_count = sum(len(cast(list, p.get("regions", []))) for p in layout)
         warnings.append(

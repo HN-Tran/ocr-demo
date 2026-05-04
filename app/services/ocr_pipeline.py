@@ -201,8 +201,8 @@ class OCRPipeline:
         self, image_bytes: bytes, *, page_number: int
     ) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
-        with Image.open(BytesIO(image_bytes)) as image:
-            image = ImageOps.exif_transpose(image)
+        with Image.open(BytesIO(image_bytes)) as opened:
+            image: Image.Image = ImageOps.exif_transpose(opened)
             if image.mode != "RGB":
                 image = image.convert("RGB")
 
