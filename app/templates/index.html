@@ -6,7 +6,7 @@
     <title>OCR-Demo</title>
     <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
   </head>
-  <body data-base-path="{{ app_base_path }}">
+  <body data-base-path="{{ app_base_path }}" data-default-model="{{ default_model }}">
     <main class="page">
       <section class="panel panel-input">
         <div class="heading-row">
@@ -397,6 +397,15 @@
             Layout
           </button>
           <button
+            id="result-view-words-btn"
+            class="result-view-btn"
+            type="button"
+            data-result-view="words"
+            aria-pressed="false"
+          >
+            Wörter
+          </button>
+          <button
             id="result-view-markdown-btn"
             class="result-view-btn"
             type="button"
@@ -419,10 +428,16 @@
           <div class="layout-head">
             <h3>Layout</h3>
             <p id="layout-summary"></p>
-            <button id="word-toggle-btn" class="layout-toggle-btn" type="button" aria-pressed="false">Wörter</button>
           </div>
           <div id="layout-visualizations" class="layout-visualizations hidden"></div>
           <div id="layout-pages"></div>
+        </section>
+        <section id="words-wrap" class="hidden">
+          <div class="layout-head">
+            <h3>Wörter</h3>
+            <p id="words-summary"></p>
+          </div>
+          <div id="words-pages"></div>
         </section>
         <section id="markdown-preview-wrap" class="hidden">
           <h3>Text</h3>
@@ -494,9 +509,26 @@
               <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
             </div>
 
+            <div class="engine-fields hidden" data-engine="local_models">
+              <label class="engine-fields-label">
+                Eigenes Modell
+                <select id="our-model"></select>
+              </label>
+              <label class="engine-fields-label">
+                Vergleichsmodell
+                <select id="their-model"></select>
+              </label>
+            </div>
+
             <div class="engine-fields hidden" data-engine="self_peer">
               <input id="peer-base-url" type="url" placeholder="Peer-Basis-URL (z. B. https://…)" autocomplete="off" />
               <input id="peer-backend" type="text" placeholder="Backend (optional, z. B. expert)" autocomplete="off" />
+              <label class="engine-fields-label">
+                Peer-Modell
+                <select id="peer-model-select" class="hidden"></select>
+                <input id="peer-model-input" type="text" placeholder="Modellname (z. B. glm-ocr:latest)" autocomplete="off" />
+              </label>
+              <p id="peer-model-hint" class="engine-fields-hint hidden"></p>
             </div>
 
             <div class="engine-fields hidden" data-engine="google_vision">

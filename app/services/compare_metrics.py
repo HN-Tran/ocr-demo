@@ -95,6 +95,20 @@ def _comparison(our_text: str, their_text: str) -> dict[str, Any]:
     }
 
 
+def reference_only(reference_text: str, hypothesis_text: str) -> dict[str, Any]:
+    """Reference-vs-hypothesis metrics for a single side.
+
+    Wird genutzt, wenn die Referenz schon vorliegt und nur die Werte gegen
+    eigene OCR berechnet werden sollen — ohne separaten Compare-Aufruf
+    gegen eine externe Engine.
+    """
+    return {
+        "ours": _reference_side(reference_text, hypothesis_text),
+        "char_count": len(reference_text),
+        "token_count": len(_tokenize(reference_text)),
+    }
+
+
 def _reference_side(reference_text: str, hypothesis_text: str) -> dict[str, Any]:
     ref_tokens = set(_tokenize(reference_text))
     hyp_tokens = set(_tokenize(hypothesis_text))

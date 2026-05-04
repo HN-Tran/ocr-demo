@@ -42,7 +42,12 @@ from app.services.compare_engines import (
 from app.services.compare_engines import (
     build_engine as build_compare_engine,
 )
-from app.services.compare_metrics import compute as compute_compare_metrics
+from app.services.compare_metrics import (
+    compute as compute_compare_metrics,
+)
+from app.services.compare_metrics import (
+    reference_only as compute_reference_metrics,
+)
 from app.services.ocr_pipeline import OCRResult
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
@@ -1370,6 +1375,40 @@ async def schemas() -> dict:
     return {"schemas": SCHEMA_REGISTRY}
 
 
+@router.get("/peer-models")
+async def peer_models(url: str) -> dict[str, object]:
+    """Proxy: ``GET <peer>/api/models`` für die Self-Peer-Modellauswahl.
+
+    Läuft serverseitig, um CORS zu umgehen. Liefert ``{"models": [...]}`` bei
+    Erfolg. Antwortet 502, wenn der Peer nicht erreichbar ist oder keine
+    erwartete Form liefert — das Frontend fällt dann auf ein freies
+    Eingabefeld zurück.
+    """
+    target = url.strip().rstrip("/")
+    if not target.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="URL muss mit http(s):// beginnen."
+        )
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl) as client:
+            resp = await client.get(f"{target}/api/models")
+            resp.raise_for_status()
+            payload = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Peer nicht erreichbar oder ungültige Antwort: {exc}",
+        ) from exc
+    items = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Peer hat keine Modellliste geliefert.",
+        )
+    return {"models": items}
+
+
 @router.get("/examples/{slot}")
 async def get_example_file(slot: int) -> FileResponse:
     settings = get_settings()
@@ -1405,6 +1444,23 @@ async def get_example_cached(slot: int, request: Request) -> dict[str, object]:
         "ocr_response": entry.ocr_response,
         "compare_response": entry.compare_response,
     }
+
+
+@router.post("/metrics/reference")
+async def metrics_against_reference(
+    text: str = Form(...),
+    reference_text: str = Form(...),
+) -> dict[str, object]:
+    """CER/WER/F1 für einen Hypothesentext gegen eine Referenz.
+
+    Wird vom Frontend nach dem OCR-Lauf aufgerufen, wenn ein Referenztext
+    vorhanden ist — so füllt sich der Referenz-Tab auch ohne /api/compare.
+    """
+    if not reference_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Referenztext ist leer."
+        )
+    return {"reference": compute_reference_metrics(reference_text, text)}
 
 
 @router.post("/extract-pdf-text")
@@ -1890,6 +1946,7 @@ async def _execute_compare(
     pipeline: OCRBackendRouter,
     include_detector_only: bool,
     backend: str | None = None,
+    our_model: str | None = None,
     expert_enable_layout: bool | None = None,
     expert_layout_model: str | None = None,
     expert_layout_threshold: float | None = None,
@@ -1919,7 +1976,7 @@ async def _execute_compare(
                 content_type=content_type,
                 mode="plain",
                 schema_name=None,
-                model=None,
+                model=our_model,
                 task="ocr_text",
                 custom_prompt=None,
                 token_limit=None,
@@ -2053,6 +2110,10 @@ async def compare_with_engine(
     # Self-Peer
     peer_base_url: str | None = Form(None),
     peer_backend: str | None = Form(None),
+    peer_model: str | None = Form(None),
+    # Local-Models (zwei Modelle gegen die eigene Pipeline)
+    our_model: str | None = Form(None),
+    their_model: str | None = Form(None),
     # Google Vision
     google_api_key: str | None = Form(None),
     # Plain-Text
@@ -2087,6 +2148,9 @@ async def compare_with_engine(
         "azure_key": azure_key or "",
         "peer_base_url": peer_base_url or "",
         "peer_backend": peer_backend or "",
+        "peer_model": peer_model or "",
+        "their_model": their_model or "",
+        "backend": backend or "",
         "google_api_key": google_api_key or "",
         "plain_text_url": plain_text_url or "",
         "plain_text_method": plain_text_method or "",
@@ -2108,7 +2172,7 @@ async def compare_with_engine(
 
     try:
         engine_instance = build_compare_engine(
-            engine, engine_config, verify_ssl=settings.verify_ssl
+            engine, engine_config, verify_ssl=settings.verify_ssl, pipeline=pipeline
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -2138,6 +2202,7 @@ async def compare_with_engine(
             pipeline=pipeline,
             include_detector_only=include_detector_only,
             backend=backend,
+            our_model=our_model,
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_layout_threshold=expert_layout_threshold,

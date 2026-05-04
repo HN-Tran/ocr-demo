@@ -143,6 +143,10 @@ h3 {
   margin-left: auto;
 }
 
+.page.has-workspace .header-actions {
+  display: none;
+}
+
 .api-docs-link {
   display: inline-flex;
   align-items: center;
@@ -216,6 +220,11 @@ button {
 input,
 textarea,
 select {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+select option {
   color: var(--ink);
   background: var(--panel);
 }
@@ -1289,6 +1298,11 @@ pre {
   font-size: 0.85rem;
 }
 
+.compare-form select option {
+  color: var(--ink);
+  background: var(--panel);
+}
+
 .compare-engine-label {
   display: grid;
   gap: 0.2rem;
@@ -1310,6 +1324,20 @@ pre {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.4rem;
+}
+
+.engine-fields-label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.engine-fields-hint {
+  margin: 0.1rem 0 0;
+  font-size: 0.74rem;
+  color: var(--muted);
 }
 
 .compare-actions {
@@ -1517,24 +1545,6 @@ pre {
   color: var(--muted);
   cursor: help;
   font-size: 0.74rem;
-}
-
-/* Word toggle button */
-.layout-toggle-btn {
-  padding: 0.18rem 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.layout-toggle-btn[aria-pressed="true"] {
-  background: #3b82f6;
-  border-color: #3b82f6;
-  color: #fff;
 }
 
 .layout-visualizations {

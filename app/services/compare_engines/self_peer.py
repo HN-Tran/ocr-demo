@@ -49,6 +49,7 @@ class SelfPeerEngine:
         *,
         base_url: str,
         backend: str | None = None,
+        model: str | None = None,
         verify_ssl: bool = True,
         timeout_s: float = 120.0,
     ) -> None:
@@ -56,6 +57,7 @@ class SelfPeerEngine:
             raise ValueError("Peer-URL fehlt.")
         self._base_url = base_url.rstrip("/")
         self._backend = backend
+        self._model = model
         self._verify_ssl = verify_ssl
         self._timeout_s = timeout_s
 
@@ -69,6 +71,8 @@ class SelfPeerEngine:
         }
         if self._backend:
             data["backend"] = self._backend
+        if self._model:
+            data["model"] = self._model
         async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
             resp = await client.post(url, files=files, data=data)
             resp.raise_for_status()

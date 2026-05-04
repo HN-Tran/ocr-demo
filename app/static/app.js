@@ -21,6 +21,7 @@ const markdownPreviewWrapEl = document.getElementById("markdown-preview-wrap");
 const markdownPreviewEl = document.getElementById("markdown-preview");
 const resultViewSwitchEl = document.getElementById("result-view-switch");
 const resultViewLayoutBtnEl = document.getElementById("result-view-layout-btn");
+const resultViewWordsBtnEl = document.getElementById("result-view-words-btn");
 const resultViewMarkdownBtnEl = document.getElementById("result-view-markdown-btn");
 const resultViewDiffBtnEl = document.getElementById("result-view-diff-btn");
 const diffWrapEl = document.getElementById("diff-wrap");
@@ -54,8 +55,10 @@ const previewPdfLinkEl = document.getElementById("preview-pdf-link");
 const layoutWrapEl = document.getElementById("layout-wrap");
 const layoutSummaryEl = document.getElementById("layout-summary");
 const layoutPagesEl = document.getElementById("layout-pages");
+const wordsWrapEl = document.getElementById("words-wrap");
+const wordsSummaryEl = document.getElementById("words-summary");
+const wordsPagesEl = document.getElementById("words-pages");
 const layoutVisualizationsEl = document.getElementById("layout-visualizations");
-const wordToggleBtnEl = document.getElementById("word-toggle-btn");
 const compareSectionEl = document.getElementById("compare-section");
 const compareFormEl = document.getElementById("compare-form");
 const azureEndpointEl = document.getElementById("azure-endpoint");
@@ -66,6 +69,12 @@ const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
 const compareEngineEl = document.getElementById("compare-engine");
 const engineFieldGroups = Array.from(document.querySelectorAll(".engine-fields"));
+const ourModelSelectEl = document.getElementById("our-model");
+const theirModelSelectEl = document.getElementById("their-model");
+const peerBaseUrlEl = document.getElementById("peer-base-url");
+const peerModelSelectEl = document.getElementById("peer-model-select");
+const peerModelInputEl = document.getElementById("peer-model-input");
+const peerModelHintEl = document.getElementById("peer-model-hint");
 const referenceTextEl = document.getElementById("reference-text");
 const referenceFileEl = document.getElementById("reference-file");
 const referenceClearBtnEl = document.getElementById("reference-clear-btn");
@@ -80,6 +89,7 @@ const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
 const compareEndpoint = `${appBasePath}/api/compare`;
 const extractPdfTextEndpoint = `${appBasePath}/api/extract-pdf-text`;
+const referenceMetricsEndpoint = `${appBasePath}/api/metrics/reference`;
 
 let lastResponse = null;
 let lastDiff = null;
@@ -150,11 +160,13 @@ const LAYOUT_REGION_KIND_ALIASES = new Map([
 ]);
 const RESULT_VIEW_BUTTONS = {
   layout: resultViewLayoutBtnEl,
+  words: resultViewWordsBtnEl,
   markdown: resultViewMarkdownBtnEl,
   diff: resultViewDiffBtnEl,
 };
 const RESULT_VIEW_WRAPS = {
   layout: layoutWrapEl,
+  words: wordsWrapEl,
   markdown: markdownPreviewWrapEl,
   diff: diffWrapEl,
 };
@@ -410,7 +422,9 @@ function showPageImage(index) {
   const layoutPages = normalizeLayoutPages(lastResponse?.layout);
   renderLayoutOverlay(layoutPages, index);
   renderLayoutPanel(layoutPages, lastResponse?.layout_visualizations, index);
-  wordToggleBtnEl.setAttribute("aria-pressed", "false");
+  if (activeResultView === "words") {
+    applyWordMode(true, layoutPages);
+  }
   if (activeResultView === "diff" && lastDiff) {
     const pageDiff = getActivePageDiff();
     renderDiffOverlay(pageDiff);
@@ -429,6 +443,9 @@ function clearLayoutSidebar() {
   layoutVisualizationsEl.innerHTML = "";
   layoutVisualizationsEl.classList.add("hidden");
   layoutWrapEl.classList.add("hidden");
+  if (wordsSummaryEl) wordsSummaryEl.textContent = "";
+  if (wordsPagesEl) wordsPagesEl.innerHTML = "";
+  if (wordsWrapEl) wordsWrapEl.classList.add("hidden");
 }
 
 function clearLayoutDisplay() {
@@ -471,8 +488,12 @@ function syncOverlayToActiveView() {
   if (activeResultView === "diff" && lastDiff) {
     renderDiffOverlay(getActivePageDiff());
     renderDiffPanel(getActivePageDiff());
+  } else if (activeResultView === "words") {
+    renderDiffOverlay(null);
+    applyWordMode(true, layoutPages);
   } else {
     renderDiffOverlay(null);
+    applyWordMode(false, layoutPages);
     if (layoutPages.length > 0) {
       renderLayoutOverlay(layoutPages, currentPageIndex);
     }
@@ -488,6 +509,7 @@ function configurePlainResultViews({ hasLayout, hasMarkdown }) {
   const availableViews = [];
   if (hasLayout) {
     availableViews.push("layout");
+    availableViews.push("words");
   }
   if (hasMarkdown) {
     availableViews.push("markdown");
@@ -833,7 +855,11 @@ function renderWordOverlay(annotatedWords) {
 }
 
 function renderWordSidebar(annotatedWords, regions) {
-  layoutPagesEl.innerHTML = "";
+  if (!wordsPagesEl) return;
+  wordsPagesEl.innerHTML = "";
+  if (wordsSummaryEl) {
+    wordsSummaryEl.textContent = `${annotatedWords.length} Wörter in ${regions.length} Region${regions.length === 1 ? "" : "en"}`;
+  }
 
   // Build ordered groups from regions, then a catch-all
   const groupOrder = regions.map((r) => r.label || "Region");
@@ -877,7 +903,7 @@ function renderWordSidebar(annotatedWords, regions) {
       listEl.appendChild(li);
     });
     sectionEl.appendChild(listEl);
-    layoutPagesEl.appendChild(sectionEl);
+    wordsPagesEl.appendChild(sectionEl);
   }
 }
 
@@ -1835,7 +1861,6 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
       renderLayoutPanel(layoutPages, data.layout_visualizations, 0);
     }
 
-    wordToggleBtnEl.setAttribute("aria-pressed", "false");
     renderDiffOverlay(null);
     compareSectionEl.classList.toggle("hidden", layoutPages.length === 0);
     compareSummaryEl.classList.add("hidden");
@@ -1859,6 +1884,33 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
   const warnings = (data.warnings || []).join(" | ");
   const backend = data.backend || backendFallback || "direct";
   metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
+
+  void maybeFetchReferenceMetrics(data?.text || "");
+}
+
+async function maybeFetchReferenceMetrics(hypothesisText) {
+  const refText = effectiveReferenceText();
+  if (!hypothesisText || !refText || !refText.trim()) {
+    return;
+  }
+  try {
+    const fd = new FormData();
+    fd.append("text", hypothesisText);
+    fd.append("reference_text", refText);
+    const resp = await fetch(referenceMetricsEndpoint, { method: "POST", body: fd });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const reference = data?.reference;
+    if (!reference) return;
+    // Wenn ein Compare-Lauf bereits Metriken gesetzt hat, ergänzen wir nur
+    // den Referenz-Block; andernfalls bauen wir ein metrics-only-Objekt.
+    lastMetrics = lastMetrics
+      ? { ...lastMetrics, reference }
+      : { intrinsic: null, comparison: null, reference };
+    renderMetricsPanel(lastMetrics);
+  } catch {
+    /* netzwerkfehler stillschweigend ignorieren */
+  }
 }
 
 function applyCompareResponse(data) {
@@ -1997,46 +2049,65 @@ function _renderReferenceTab(reference) {
     return `<p class="compare-reference-hint">Kein Referenztext geliefert. Im Bereich „Referenztext" oben einfügen oder eine .txt hochladen.</p>`;
   }
   const ours = reference.ours || {};
-  const theirs = reference.theirs || {};
+  const theirs = reference.theirs;  // null wenn kein Compare-Lauf erfolgte
   const fmt = (v) => _fmtNumber(v, { digits: 3 });
   const fmtPct = (v) => _fmtNumber(v, { percent: true });
+  const showTheirs = theirs && typeof theirs === "object";
+  const tHead = showTheirs
+    ? `<thead><tr><th>Metrik</th><th>Wir</th><th>Andere</th></tr></thead>`
+    : `<thead><tr><th>Metrik</th><th>Wir</th></tr></thead>`;
+  const row = (label, oursValue, theirsValue, opts) =>
+    showTheirs ? _metricRow(label, oursValue, theirsValue, opts) : _singleMetricRow(label, oursValue, opts?.tooltip);
+  const t = theirs || {};
   const rows = [
-    _metricRow("CER", fmt(ours.cer), fmt(theirs.cer), {
+    row("CER", fmt(ours.cer), fmt(t.cer), {
       tooltip: "Character Error Rate: Levenshtein(Referenz, Hypothese) / |Referenz|. Niedriger = besser.",
     }),
-    _metricRow("WER", fmt(ours.wer), fmt(theirs.wer), {
+    row("WER", fmt(ours.wer), fmt(t.wer), {
       tooltip: "Word Error Rate: Levenshtein auf Wortbasis / |Referenz-Wörter|. Niedriger = besser.",
     }),
-    _metricRow("Token-Precision", fmtPct(ours.token_precision), fmtPct(theirs.token_precision)),
-    _metricRow("Token-Recall", fmtPct(ours.token_recall), fmtPct(theirs.token_recall)),
-    _metricRow("Token-F1", fmtPct(ours.token_f1), fmtPct(theirs.token_f1)),
+    row("Token-Precision", fmtPct(ours.token_precision), fmtPct(t.token_precision)),
+    row("Token-Recall", fmtPct(ours.token_recall), fmtPct(t.token_recall)),
+    row("Token-F1", fmtPct(ours.token_f1), fmtPct(t.token_f1)),
   ];
   return `
     <p class="metrics-section-title">Referenz: ${reference.token_count ?? "?"} Tokens, ${reference.char_count ?? "?"} Zeichen</p>
     <table class="metrics-table">
-      <thead><tr><th>Metrik</th><th>Wir</th><th>Andere</th></tr></thead>
+      ${tHead}
       <tbody>${rows.join("")}</tbody>
     </table>
   `;
 }
 
 function renderMetricsPanel(metrics) {
-  if (!metrics) {
+  if (!metrics || (!metrics.intrinsic && !metrics.comparison && !metrics.reference)) {
     metricsPanelEl?.classList.add("hidden");
     if (metricsContentEl) metricsContentEl.innerHTML = "";
     return;
   }
   metricsPanelEl?.classList.remove("hidden");
-  const refTab = metricsTabBtns.find((b) => b.dataset.metricsTab === "reference");
-  if (refTab) {
-    if (metrics.reference) {
-      refTab.removeAttribute("disabled");
-      refTab.removeAttribute("title");
+
+  const setTabState = (name, enabled, disabledTitle) => {
+    const btn = metricsTabBtns.find((b) => b.dataset.metricsTab === name);
+    if (!btn) return;
+    if (enabled) {
+      btn.removeAttribute("disabled");
+      btn.removeAttribute("title");
     } else {
-      refTab.setAttribute("disabled", "");
-      refTab.setAttribute("title", "Erfordert Referenztext");
-      if (activeMetricsTab === "reference") activeMetricsTab = "intrinsic";
+      btn.setAttribute("disabled", "");
+      btn.setAttribute("title", disabledTitle || "");
     }
+  };
+  setTabState("intrinsic", !!metrics.intrinsic, "Erfordert Vergleichslauf");
+  setTabState("comparison", !!metrics.comparison, "Erfordert Vergleichslauf");
+  setTabState("reference", !!metrics.reference, "Erfordert Referenztext");
+
+  const enabledOrder = ["intrinsic", "comparison", "reference"].filter((name) => {
+    const btn = metricsTabBtns.find((b) => b.dataset.metricsTab === name);
+    return btn && !btn.hasAttribute("disabled");
+  });
+  if (!enabledOrder.includes(activeMetricsTab)) {
+    activeMetricsTab = enabledOrder[0] || "intrinsic";
   }
   _renderActiveMetricsTab();
 }
@@ -2417,14 +2488,6 @@ pageSelectorEl.addEventListener("change", () => {
   showPageImage(index);
 });
 
-// Word polygon toggle
-wordToggleBtnEl.addEventListener("click", () => {
-  const active = wordToggleBtnEl.getAttribute("aria-pressed") === "true";
-  const next = !active;
-  wordToggleBtnEl.setAttribute("aria-pressed", String(next));
-  const layoutPages = normalizeLayoutPages(lastResponse?.layout);
-  applyWordMode(next, layoutPages);
-});
 
 // Compare with Azure endpoint
 function _activeEngineName() {
@@ -2436,7 +2499,113 @@ function _showEngineFields(name) {
     const matches = group.dataset.engine === name;
     group.classList.toggle("hidden", !matches);
   });
+  if (name === "local_models") {
+    void _ensureLocalModelOptions();
+  }
 }
+
+const _modelsEndpoint = `${appBasePath}/api/models`;
+const _peerModelsEndpoint = `${appBasePath}/api/peer-models`;
+const _defaultModelName = (document.body?.dataset.defaultModel || "").trim();
+let _localModelsCache = null;
+
+async function _fetchLocalModels() {
+  if (_localModelsCache) return _localModelsCache;
+  try {
+    const resp = await fetch(_modelsEndpoint);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    _localModelsCache = Array.isArray(data?.models) ? data.models : [];
+  } catch {
+    _localModelsCache = [];
+  }
+  return _localModelsCache;
+}
+
+function _populateModelSelect(selectEl, models, preferred) {
+  if (!selectEl) return;
+  selectEl.innerHTML = "";
+  if (models.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Keine Modelle verfügbar";
+    opt.disabled = true;
+    selectEl.appendChild(opt);
+    return;
+  }
+  for (const name of models) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    selectEl.appendChild(opt);
+  }
+  if (preferred && models.includes(preferred)) {
+    selectEl.value = preferred;
+  }
+}
+
+async function _ensureLocalModelOptions() {
+  if (ourModelSelectEl?.options.length && theirModelSelectEl?.options.length) return;
+  const models = await _fetchLocalModels();
+  _populateModelSelect(ourModelSelectEl, models, _defaultModelName);
+  // Pick a different default for "their-model" so the comparison is non-trivial.
+  const fallbackOther = models.find((n) => n !== _defaultModelName) || _defaultModelName;
+  _populateModelSelect(theirModelSelectEl, models, fallbackOther);
+}
+
+let _peerModelsAbortController = null;
+
+async function _refreshPeerModels() {
+  if (!peerBaseUrlEl) return;
+  const url = peerBaseUrlEl.value.trim();
+  if (!url) {
+    peerModelSelectEl?.classList.add("hidden");
+    peerModelInputEl?.classList.remove("hidden");
+    if (peerModelHintEl) {
+      peerModelHintEl.textContent = "";
+      peerModelHintEl.classList.add("hidden");
+    }
+    return;
+  }
+  if (_peerModelsAbortController) _peerModelsAbortController.abort();
+  _peerModelsAbortController = new AbortController();
+  if (peerModelHintEl) {
+    peerModelHintEl.textContent = "Modelle werden geladen…";
+    peerModelHintEl.classList.remove("hidden");
+  }
+  try {
+    const resp = await fetch(
+      `${_peerModelsEndpoint}?url=${encodeURIComponent(url)}`,
+      { signal: _peerModelsAbortController.signal },
+    );
+    if (!resp.ok) throw new Error(String(resp.status));
+    const data = await resp.json();
+    const models = Array.isArray(data?.models) ? data.models : [];
+    if (models.length === 0) throw new Error("leer");
+    _populateModelSelect(peerModelSelectEl, models, _defaultModelName);
+    peerModelSelectEl?.classList.remove("hidden");
+    peerModelInputEl?.classList.add("hidden");
+    if (peerModelHintEl) {
+      peerModelHintEl.textContent = `${models.length} Modelle vom Peer geladen.`;
+      peerModelHintEl.classList.remove("hidden");
+    }
+  } catch (err) {
+    if (err?.name === "AbortError") return;
+    peerModelSelectEl?.classList.add("hidden");
+    peerModelInputEl?.classList.remove("hidden");
+    if (peerModelHintEl) {
+      peerModelHintEl.textContent = "Peer-Modellliste nicht erreichbar — Modellnamen frei eingeben.";
+      peerModelHintEl.classList.remove("hidden");
+    }
+  }
+}
+
+let _peerUrlDebounce = 0;
+peerBaseUrlEl?.addEventListener("input", () => {
+  window.clearTimeout(_peerUrlDebounce);
+  _peerUrlDebounce = window.setTimeout(() => void _refreshPeerModels(), 350);
+});
+peerBaseUrlEl?.addEventListener("change", () => void _refreshPeerModels());
 
 if (compareEngineEl) {
   _showEngineFields(_activeEngineName());
@@ -2449,10 +2618,20 @@ function _appendEngineConfig(fd, engineName) {
     if (!get("azure-endpoint")) return "Azure-Endpunkt fehlt.";
     fd.append("azure_endpoint", get("azure-endpoint"));
     fd.append("azure_key", get("azure-key"));
+  } else if (engineName === "local_models") {
+    const our = ourModelSelectEl?.value?.trim() || "";
+    const their = theirModelSelectEl?.value?.trim() || "";
+    if (!our || !their) return "Bitte beide Modelle auswählen.";
+    fd.append("our_model", our);
+    fd.append("their_model", their);
   } else if (engineName === "self_peer") {
     if (!get("peer-base-url")) return "Peer-URL fehlt.";
     fd.append("peer_base_url", get("peer-base-url"));
     if (get("peer-backend")) fd.append("peer_backend", get("peer-backend"));
+    const peerModel = peerModelSelectEl && !peerModelSelectEl.classList.contains("hidden")
+      ? peerModelSelectEl.value?.trim() || ""
+      : peerModelInputEl?.value?.trim() || "";
+    if (peerModel) fd.append("peer_model", peerModel);
   } else if (engineName === "google_vision") {
     if (!get("google-api-key")) return "Google-Vision-API-Key fehlt.";
     fd.append("google_api_key", get("google-api-key"));
