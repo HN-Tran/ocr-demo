@@ -534,6 +534,56 @@ def _locate_span_in_page_content(
     )
 
 
+def _words_from_detector_polys(
+    *,
+    detector_words: list[object],
+    page_content: str,
+    page_offset: int,
+    string_index_type: str,
+) -> list[dict[str, object]]:
+    """Build Azure-compatible ``words`` entries directly from detector polygons.
+
+    Bevorzugt gegenüber dem synthetischen Wort-Wrapper, weil DocTR/PaddleOCR
+    bereits genaue Wort-Boxen liefert. Span-Offsets werden best-effort durch
+    sequentielle Suche im ``page_content`` ermittelt.
+    """
+    out: list[dict[str, object]] = []
+    cursor = 0
+    for entry in detector_words:
+        if not isinstance(entry, dict):
+            continue
+        content = str(entry.get("content") or "").strip()
+        if not content:
+            continue
+        polygon = entry.get("polygon")
+        if not isinstance(polygon, list) or len(polygon) < 8:
+            continue
+        try:
+            poly_floats = [float(v) for v in polygon[:8]]
+        except (TypeError, ValueError):
+            continue
+        try:
+            confidence = float(entry.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        word_span, cursor = _locate_span_in_page_content(
+            page_content=page_content,
+            fragment=content,
+            page_offset=page_offset,
+            string_index_type=string_index_type,
+            search_cursor=cursor,
+        )
+        out.append(
+            {
+                "content": content,
+                "span": word_span,
+                "confidence": confidence,
+                "polygon": poly_floats,
+            }
+        )
+    return out
+
+
 def _build_line_and_word_entries(
     *,
     page_content: str,
@@ -544,6 +594,12 @@ def _build_line_and_word_entries(
     lines: list[dict[str, object]] = []
     words: list[dict[str, object]] = []
     search_cursor = 0
+
+    # Wenn der Detektor (DocTR / PaddleOCR) echte Wort-Polygone geliefert hat,
+    # nutzen wir die statt des synthetischen Wort-Wrappings — die Boxen sind
+    # genauer, das ist genau das, was der Layout-Viewer schon zeigt.
+    detector_words_raw = page_layout.get("word_polys") if isinstance(page_layout, dict) else None
+    use_detector_words = isinstance(detector_words_raw, list) and len(detector_words_raw) > 0
 
     regions = page_layout.get("regions") if isinstance(page_layout, dict) else None
     if isinstance(regions, list) and regions:
@@ -638,6 +694,13 @@ def _build_line_and_word_entries(
                         "polygon": word_poly,
                     }
                     words.append(word_entry)
+        if use_detector_words:
+            words = _words_from_detector_polys(
+                detector_words=cast(list[object], detector_words_raw),
+                page_content=page_content,
+                page_offset=page_offset,
+                string_index_type=string_index_type,
+            )
         return lines, words
 
     for segment in [line.strip() for line in page_content.splitlines() if line.strip()]:
@@ -671,6 +734,13 @@ def _build_line_and_word_entries(
                     "polygon": _empty_polygon(),
                 }
             )
+    if use_detector_words:
+        words = _words_from_detector_polys(
+            detector_words=cast(list[object], detector_words_raw),
+            page_content=page_content,
+            page_offset=page_offset,
+            string_index_type=string_index_type,
+        )
     return lines, words
 
 
@@ -1510,9 +1580,6 @@ async def metrics_against_reference(
 # Batch-Benchmark
 # ---------------------------------------------------------------------------
 
-_BENCHMARK_MAX_FILES = 50
-_BENCHMARK_MAX_RUNNERS = 5
-
 
 @router.get("/benchmark")
 async def benchmark_list(
@@ -1545,14 +1612,15 @@ async def benchmark_create(
     mlflow_sink: MlflowSink = Depends(get_mlflow_sink),
 ) -> dict[str, object]:
     del request
+    settings = get_settings()
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Keine Dateien hochgeladen."
         )
-    if len(files) > _BENCHMARK_MAX_FILES:
+    if len(files) > settings.benchmark_max_files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Maximal {_BENCHMARK_MAX_FILES} Dateien pro Job.",
+            detail=f"Maximal {settings.benchmark_max_files} Dateien pro Job.",
         )
 
     model_list = [m.strip() for m in models.split(",") if m.strip()]
@@ -1563,13 +1631,11 @@ async def benchmark_create(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Mindestens ein Modell oder eine Engine wählen.",
         )
-    if runner_count > _BENCHMARK_MAX_RUNNERS:
+    if runner_count > settings.benchmark_max_runners:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Maximal {_BENCHMARK_MAX_RUNNERS} Runner pro Job.",
+            detail=f"Maximal {settings.benchmark_max_runners} Runner pro Job.",
         )
-
-    settings = get_settings()
     engine_config: dict[str, str] = {
         "azure_endpoint": azure_endpoint or "",
         "azure_key": azure_key or "",

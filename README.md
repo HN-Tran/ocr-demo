@@ -43,6 +43,10 @@ export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
 export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"
+export BENCHMARK_MAX_FILES="50"          # /api/benchmark Hard-Cap
+export BENCHMARK_MAX_RUNNERS="5"         # /api/benchmark Hard-Cap
+export MLFLOW_TRACKING_URI=""            # leer = kein Tracking; HTTP- oder file:-URI
+export MLFLOW_EXPERIMENT_NAME="ocr-demo"
 ```
 
 ## Starten
@@ -78,6 +82,7 @@ Kompatibilitäts-Hinweise:
 - `pages` und `stringIndexType` werden akzeptiert; `pages` filtert aktuell nur das Antwort-Payload, nicht die eigentliche OCR-Ausführung.
 - `modelId` ist auf `prebuilt-read` begrenzt.
 - `pages`, `paragraphs`, `lines`, `words` und `spans` werden jetzt best-effort aus OCR-Text und Layoutdaten gefüllt. `textElements` bleibt dabei eine pragmatische Annäherung, keine vollständige Grapheme-Cluster-Implementierung.
+- `pages[].words` nutzt — sobald `OCR_WORD_DETECTOR=doctr|paddleocr` aktiv ist und der Detektor Wort-Polygone geliefert hat — die echten Detektor-Boxen (gleiche Daten wie der „Wörter"-Tab im Browser) statt der synthetischen Wort-Wrapper aus den Layout-Regionen. Ohne Detektor bleibt der bisherige Fallback erhalten.
 
 Multipart-Felder:
 
@@ -250,7 +255,32 @@ dem Compare-Flow. Pro Zeile werden Token-/Zeichen-Anzahl, Latenz und
 (falls Referenztext mitgegeben wurde) CER/WER/Token-F1 berechnet. Aggregat
 pro Runner liefert Durchschnitt + Standardabweichung.
 
-Job-Lifecycle:
+### Wie es intern funktioniert
+
+- **In-Memory-Store** (`BenchmarkJobStore` in `app/services/benchmark.py`):
+  Ein einzelnes Python-Dict im FastAPI-Prozess hält alle Jobs. `asyncio.Lock`
+  serialisiert Mutationen; bei Prozess-Neustart sind die Jobs weg. Pro Replica
+  unabhängig — nicht für horizontales Scaling ausgelegt.
+- **Worker** (`run_benchmark_job`): wird als `asyncio.create_task(...)` im
+  POST-Handler gefeuert, läuft im Hintergrund und mutiert `job.rows` direkt.
+  Der POST kommt sofort mit `{job_id}` zurück, der Worker arbeitet weiter.
+- **Sequentiell, kein Parallelismus**: alle (Datei × Runner)-Paare werden
+  nacheinander abgearbeitet. Grund: Ollama lädt Modelle exklusiv, parallele
+  Calls thrashen den Speicher und verfälschen die Latenz-Messung. Externe
+  Engines liefen *könnten* parallel laufen — bisher nicht implementiert,
+  weil Latenz-Vergleichbarkeit wichtiger ist als Wall-Clock-Zeit.
+- **Tracking**: jede Zeile (`BenchmarkRow`) bekommt Status `pending → running
+  → done/error`, plus Metriken sobald der Runner zurückkommt. Das Frontend
+  pollt `GET /api/benchmark/{id}` alle 2 s — das Polling ist eine
+  Browser-Convenience, der Backend pusht nichts. Bei MLflow wird zusätzlich
+  ein verschachtelter Run pro Zeile geschrieben (siehe unten).
+- **Persistenz**: drei Schichten, jede opt-in.
+  - In-Memory: bis zum nächsten Restart.
+  - CSV: `GET /api/benchmark/{id}/csv` als Anhang herunterladen.
+  - MLflow: bei gesetztem `MLFLOW_TRACKING_URI` zusätzliches Logging mit
+    Artefakten und Parent/Child-Run-Hierarchie.
+
+### Job-Lifecycle
 
 ```
 POST   /api/benchmark              → { job_id }
@@ -260,11 +290,99 @@ GET    /api/benchmark/{job_id}/csv → CSV-Export
 DELETE /api/benchmark/{job_id}     → aus dem In-Memory-Store löschen
 ```
 
-Hard-Caps: 50 Dateien und 5 Runner pro Job. Phase 1 hält Jobs prozesslokal —
-nach einem Restart sind sie weg, also CSV oder MLflow nutzen, wenn die
-Ergebnisse persistieren sollen.
+Hard-Caps konfigurierbar via `BENCHMARK_MAX_FILES` (Standard 50) und
+`BENCHMARK_MAX_RUNNERS` (Standard 5).
 
-**MLflow-Tracking (optional)**
+### Per REST steuerbar (curl-Beispiel)
+
+Browser-UI ist optional — die API ist self-contained:
+
+```bash
+# 1. Job submitten (zwei Dateien, je ein Referenztext, zwei Modelle, plus Azure)
+JOB=$(curl -s -X POST http://localhost:8000/api/benchmark \
+  -F "files=@doc1.pdf" \
+  -F "files=@doc2.pdf" \
+  -F "references=Hello world from doc1" \
+  -F "references=" \
+  -F "models=glm-ocr:latest,qwen2.5vl:7b" \
+  -F "engines=azure" \
+  -F "azure_endpoint=https://your-host" \
+  -F "azure_key=…" \
+  | jq -r .job_id)
+
+# 2. Pollen bis fertig
+while true; do
+  status=$(curl -s "http://localhost:8000/api/benchmark/$JOB" | jq -r .status)
+  echo "$status"
+  [[ "$status" == "done" || "$status" == "failed" ]] && break
+  sleep 2
+done
+
+# 3. Ergebnis als CSV holen
+curl -s "http://localhost:8000/api/benchmark/$JOB/csv" -o "benchmark-$JOB.csv"
+
+# 4. Aus dem Server-Speicher entfernen (optional)
+curl -s -X DELETE "http://localhost:8000/api/benchmark/$JOB"
+```
+
+`models` und `engines` sind kommagetrennte Listen. Mindestens einer der
+beiden Werte muss nicht leer sein. `references` muss in derselben
+Reihenfolge wie `files` mitgegeben werden — leerer String = keine Referenz
+für diese Datei.
+
+Engine-spezifische Felder (nur die ausgewählten Engines werden bedient):
+
+| Engine          | Erforderliche Felder                                           |
+|-----------------|----------------------------------------------------------------|
+| `azure`         | `azure_endpoint`, `azure_key`                                  |
+| `self_peer`     | `peer_base_url`, optional `peer_backend`, `peer_model`         |
+| `google_vision` | `google_api_key`                                               |
+| `plain_text`    | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` |
+| `local_models`  | (nicht über Engines — siehe `models`)                          |
+
+### Antwort-Schema (`GET /api/benchmark/{job_id}`)
+
+```json
+{
+  "id": "abc123…",
+  "created_at": "2026-05-…",
+  "status": "running",
+  "progress": {"done": 5, "total": 10},
+  "options": {"files": [...], "models": [...], "engines": [...]},
+  "rows": [
+    {
+      "file_index": 0,
+      "file_name": "doc1.pdf",
+      "runner_kind": "local_model",
+      "runner_label": "glm-ocr:latest",
+      "status": "done",
+      "text_chars": 1234,
+      "text_tokens": 192,
+      "latency_ms": 4521,
+      "cer": 0.082,
+      "wer": 0.137,
+      "token_f1": 0.882,
+      "avg_confidence": 0.94,
+      "warnings": [],
+      "error": null
+    }
+  ],
+  "aggregate": {
+    "per_runner": {
+      "glm-ocr:latest": {
+        "doc_count": 2, "success_count": 2, "failure_count": 0,
+        "mean_cer": 0.082, "stdev_cer": 0.041,
+        "mean_wer": 0.137, "mean_token_f1": 0.882,
+        "mean_latency_ms": 4231
+      }
+    }
+  },
+  "error": null,
+  "mlflow": {"run_id": "…", "run_url": "https://mlflow…/#/experiments/…/runs/…"}
+}
+```
+
+### MLflow-Tracking (optional)
 
 Wenn `MLFLOW_TRACKING_URI` gesetzt ist UND `mlflow` installiert wurde
 (`pip install '.[mlflow]'`), schreibt der Worker zusätzlich:
@@ -281,8 +399,9 @@ export MLFLOW_EXPERIMENT_NAME=ocr-demo          # default: "ocr-demo"
 ```
 
 Im Benchmark-UI erscheint ein „MLflow-Run öffnen"-Link, sobald der Job
-einen aktiven Tracking-Server verwendet (HTTP/HTTPS — bei `file:`-URIs
-gibt es keine sinnvolle Browser-URL, dann fehlt der Link).
+einen HTTP/HTTPS-Tracking-Server nutzt; das `mlflow.run_url`-Feld in der
+JSON-Antwort taugt fürs Verlinken aus eigenen Tools. Bei `file:`-URIs gibt
+es keine sinnvolle Browser-URL, dann bleibt das Feld `null`.
 
 ## Evaluation
 
