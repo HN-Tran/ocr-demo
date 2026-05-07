@@ -139,6 +139,58 @@ class OCRResult:
 PREVIEW_MAX_DIM = 1600
 
 
+def _flatten_to_rgb(image: Image.Image) -> Image.Image:
+    """In RGB konvertieren, Alpha-Kanal auf Weiß komponieren.
+
+    PILs `convert("RGB")` legt RGBA-Bilder per Default auf **schwarzem** Hintergrund
+    ab — Text auf transparenten PNGs verschwindet dann. Wir komponieren stattdessen
+    auf Weiß (Papier-Hintergrund), das ist der mit Abstand häufigere Fall für OCR.
+    """
+    if image.mode == "RGB":
+        return image
+    if image.mode in ("RGBA", "LA"):
+        background = Image.new("RGB", image.size, (255, 255, 255))
+        source = image if image.mode == "RGBA" else image.convert("RGBA")
+        background.paste(source, mask=source.split()[-1])
+        return background
+    if image.mode == "P" and "transparency" in image.info:
+        # Palette mit Transparenz → über RGBA aufs weiße Backing setzen.
+        return _flatten_to_rgb(image.convert("RGBA"))
+    return image.convert("RGB")
+
+
+def _maybe_upscale_binarized(
+    image: Image.Image,
+    *,
+    original_mode: str,
+    min_dim: int,
+) -> tuple[Image.Image, str | None]:
+    """Bitonal/Grayscale-Eingaben mit kleiner Auflösung hochskalieren.
+
+    Modelle wie GLM-OCR/Qwen-VL trainieren auf RGB-Fotos mit hunderten von Pixeln
+    pro Glyph. Bei reinen 1-bit-Scans (Fax, S/W-Drucker) sind die dünnen
+    Großbuchstaben „I"/„l"/„1" schwer unterscheidbar — wir geben dem Modell mehr
+    Sub-Pixel-Information durch LANCZOS-Hochskalierung.
+
+    Gibt das (eventuell neue) Bild und optional eine Warnung zurück.
+    """
+    if min_dim <= 0:
+        return image, None
+    if original_mode not in {"1", "L", "LA"}:
+        return image, None
+    longest = max(image.size)
+    if longest >= min_dim:
+        return image, None
+    ratio = min_dim / longest
+    new_size = (max(1, int(image.size[0] * ratio)), max(1, int(image.size[1] * ratio)))
+    upscaled = image.resize(new_size, Image.Resampling.LANCZOS)
+    return (
+        upscaled,
+        f"Binärbild ({original_mode}) von {image.size[0]}x{image.size[1]} auf "
+        f"{new_size[0]}x{new_size[1]} hochskaliert (LANCZOS) für robustere OCR",
+    )
+
+
 def encode_page_images(page_bytes_list: list[bytes], quality: int = 70) -> list[str]:
     """Convert a list of PNG page bytes to JPEG base64 data URLs for preview.
 
@@ -147,7 +199,7 @@ def encode_page_images(page_bytes_list: list[bytes], quality: int = 70) -> list[
     """
     result: list[str] = []
     for png_bytes in page_bytes_list:
-        img = Image.open(BytesIO(png_bytes)).convert("RGB")
+        img = _flatten_to_rgb(Image.open(BytesIO(png_bytes)))
         longest = max(img.width, img.height)
         if longest > PREVIEW_MAX_DIM:
             ratio = PREVIEW_MAX_DIM / longest
@@ -168,6 +220,7 @@ class OCRPipeline:
         default_model: str,
         default_token_limit: int,
         max_image_dim: int,
+        binarized_min_dim: int = 1800,
     ) -> None:
         if default_token_limit < 1:
             raise ValueError("default_token_limit muss eine positive ganze Zahl sein")
@@ -177,6 +230,7 @@ class OCRPipeline:
         self.default_model = default_model
         self.default_token_limit = default_token_limit
         self.max_image_dim = max_image_dim
+        self.binarized_min_dim = binarized_min_dim
         prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
         self.plain_prompt_template = (prompts_dir / "plain_ocr.txt").read_text(encoding="utf-8")
         self.structured_prompt_template = (prompts_dir / "structured_ocr.txt").read_text(
@@ -202,9 +256,18 @@ class OCRPipeline:
     ) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
         with Image.open(BytesIO(image_bytes)) as opened:
-            image: Image.Image = ImageOps.exif_transpose(opened)
-            if image.mode != "RGB":
-                image = image.convert("RGB")
+            rotated: Image.Image = ImageOps.exif_transpose(opened)
+            original_mode = rotated.mode
+            image = _flatten_to_rgb(rotated)
+
+            # Schritt 1: bitonale/Grauwert-Eingaben hochskalieren, BEVOR wir
+            # an die max_image_dim-Grenze kommen — sonst geht der Vorteil
+            # verloren, weil das Bild ohnehin klein bleibt.
+            image, upscale_warning = _maybe_upscale_binarized(
+                image, original_mode=original_mode, min_dim=self.binarized_min_dim
+            )
+            if upscale_warning:
+                warnings.append(upscale_warning)
 
             width, height = image.size
             max_dim = max(width, height)
@@ -306,8 +369,7 @@ class OCRPipeline:
                 for frame_index in frame_indices:
                     gif_image.seek(frame_index)
                     frame = gif_image.copy()
-                    if frame.mode != "RGB":
-                        frame = frame.convert("RGB")
+                    frame = _flatten_to_rgb(frame)
                     output = BytesIO()
                     frame.save(output, format="PNG", optimize=True)
                     rendered_frames.append(output.getvalue())
@@ -329,7 +391,7 @@ class OCRPipeline:
         storyboard_frames: list[Image.Image] = []
         for frame_index in frame_indices:
             with Image.open(BytesIO(prepared_images[frame_index])) as frame_image:
-                storyboard_frames.append(frame_image.convert("RGB"))
+                storyboard_frames.append(_flatten_to_rgb(frame_image))
 
         columns = 2 if len(storyboard_frames) > 2 else len(storyboard_frames)
         rows = (len(storyboard_frames) + columns - 1) // columns

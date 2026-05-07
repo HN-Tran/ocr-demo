@@ -42,12 +42,25 @@ export OCR_EXPERT_OCR_API_PORT="11434"
 export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
 export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
-export MAX_IMAGE_DIM="2048"
+export MAX_IMAGE_DIM="2048"               # Obergrenze für OCR-Bildgröße
+export OCR_EXPERT_LAYOUT_MAX_DIM="1800"   # Layout-Detektor sieht max. so groß
+export OCR_BINARIZED_MIN_DIM="1800"       # 1-bit/L-Eingaben werden mind. so groß
 export BENCHMARK_MAX_FILES="50"          # /api/benchmark Hard-Cap
 export BENCHMARK_MAX_RUNNERS="5"         # /api/benchmark Hard-Cap
 export MLFLOW_TRACKING_URI=""            # leer = kein Tracking; HTTP- oder file:-URI
 export MLFLOW_EXPERIMENT_NAME="ocr-demo"
 ```
+
+Eingabe-Preprocessing (in `app/services/ocr_pipeline.py`):
+
+- RGBA/LA und transparente Palette-PNGs werden auf **weißem** Hintergrund komponiert (vermeidet schwarze Defaults, die schwarzen Text auf transparentem Hintergrund unsichtbar machen würden).
+- Bitonale (`1`) und Graustufen (`L`) Eingaben werden auf mindestens
+  `OCR_BINARIZED_MIN_DIM` Pixel (Standard 1800) hochskaliert, damit Modelle
+  „l"/„I"/„1" zuverlässiger unterscheiden können.
+- Im Expert-Backend wird das Bild vor dem Layout-Detektor zusätzlich auf
+  `OCR_EXPERT_LAYOUT_MAX_DIM` (Standard 1800) heruntergeskaliert. Die
+  Bounding-Boxes werden danach wieder auf die Originalauflösung skaliert,
+  sodass die Per-Region-OCR weiterhin auf dem hochaufgelösten Bild arbeitet.
 
 ## Starten
 

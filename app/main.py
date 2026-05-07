@@ -68,6 +68,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         default_model=settings.ollama_model,
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
+        binarized_min_dim=settings.ocr_binarized_min_dim,
     )
     document_pipeline = DocumentPipeline(
         direct_pipeline=ocr_pipeline,
@@ -81,6 +82,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         enable_text_anchor=settings.ocr_expert_text_anchor,
         text_anchor_threshold=settings.ocr_expert_text_anchor_threshold,
         word_detector=_try_create_word_detector(settings.ocr_word_detector),
+        layout_max_dim=settings.ocr_expert_layout_max_dim,
     )
     ocr_backend_router = OCRBackendRouter(
         default_backend=settings.ocr_backend,

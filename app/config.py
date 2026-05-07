@@ -50,6 +50,8 @@ class Settings:
     ocr_expert_text_anchor: bool
     ocr_expert_text_anchor_threshold: float
     ocr_expert_compare_include_detector_only: bool
+    ocr_expert_layout_max_dim: int
+    ocr_binarized_min_dim: int
     azure_preset_label: str
     azure_preset_endpoint: str
     azure_preset_key: str
@@ -108,6 +110,8 @@ def get_settings() -> Settings:
         ocr_expert_compare_include_detector_only=_env_bool(
             "OCR_EXPERT_COMPARE_INCLUDE_DETECTOR_ONLY", False
         ),
+        ocr_expert_layout_max_dim=max(256, _env_int("OCR_EXPERT_LAYOUT_MAX_DIM", 1800)),
+        ocr_binarized_min_dim=max(0, _env_int("OCR_BINARIZED_MIN_DIM", 1800)),
         azure_preset_label=os.getenv("AZURE_PRESET_LABEL", "").strip(),
         azure_preset_endpoint=os.getenv("AZURE_PRESET_ENDPOINT", "").strip(),
         azure_preset_key=os.getenv("AZURE_PRESET_KEY", "").strip(),

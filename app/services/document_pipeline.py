@@ -433,6 +433,7 @@ class DocumentPipeline:
         enable_text_anchor: bool = True,
         text_anchor_threshold: float = 60.0,
         word_detector: WordDetector | None = None,
+        layout_max_dim: int = 1800,
     ) -> None:
         self.direct_pipeline = direct_pipeline
         self.ollama_client = ollama_client
@@ -445,6 +446,7 @@ class DocumentPipeline:
         self.enable_text_anchor = enable_text_anchor
         self.text_anchor_threshold = text_anchor_threshold
         self.word_detector: WordDetector | None = word_detector
+        self.layout_max_dim = max(256, int(layout_max_dim))
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
         self._word_detector_cache: dict[str, WordDetector | None] = {}
@@ -569,8 +571,46 @@ class DocumentPipeline:
             page_text = ""
 
         # 2. Layout detection — for structure only.
-        detection_results = detector.process([image])
+        # Layout-Modelle (PP-DocLayout, Deformable DETR, RT-DETR) sind auf
+        # ~800–1024 px Input trainiert. Großformatige Scans/Fotos hier nochmal
+        # auf layout_max_dim runterskalieren, sonst zerfasern die Regionen.
+        # Die Bboxes werden danach wieder auf die Originalauflösung skaliert,
+        # damit die Per-Region-OCR auf dem hochaufgelösten Bild crops macht.
+        layout_image = image
+        layout_scale_x = 1.0
+        layout_scale_y = 1.0
+        if max(image.size) > self.layout_max_dim:
+            ratio = self.layout_max_dim / max(image.size)
+            new_size = (
+                max(1, int(image.size[0] * ratio)),
+                max(1, int(image.size[1] * ratio)),
+            )
+            layout_image = image.resize(new_size, Image.Resampling.LANCZOS)
+            layout_scale_x = image.size[0] / new_size[0]
+            layout_scale_y = image.size[1] / new_size[1]
+
+        detection_results = detector.process([layout_image])
         raw_regions = detection_results[0] if detection_results else []
+
+        if layout_scale_x != 1.0 or layout_scale_y != 1.0:
+            for region in raw_regions:
+                if not isinstance(region, dict):
+                    continue
+                bbox = region.get("bbox_2d")
+                if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                    region["bbox_2d"] = [
+                        float(bbox[0]) * layout_scale_x,
+                        float(bbox[1]) * layout_scale_y,
+                        float(bbox[2]) * layout_scale_x,
+                        float(bbox[3]) * layout_scale_y,
+                    ]
+                polygon = region.get("polygon")
+                if isinstance(polygon, (list, tuple)) and len(polygon) >= 8:
+                    region["polygon"] = [
+                        float(p) * (layout_scale_x if i % 2 == 0 else layout_scale_y)
+                        for i, p in enumerate(polygon)
+                    ]
+
         regions = _sort_reading_order(raw_regions)
 
         # 3. Build layout regions — crop OCR each, fuzzy-match against source text.
