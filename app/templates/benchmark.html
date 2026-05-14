@@ -38,6 +38,12 @@
                 {{ azure_preset_label }}
               </label>
               {% endif %}
+              {% if azure_preset_layout_label %}
+              <label>
+                <input type="checkbox" name="engine" value="azure_preset_layout" />
+                {{ azure_preset_layout_label }}
+              </label>
+              {% endif %}
               {% for eng in compare_engines %}
               <label>
                 <input type="checkbox" name="engine" value="{{ eng.name }}" />

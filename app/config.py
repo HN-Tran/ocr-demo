@@ -54,6 +54,7 @@ class Settings:
     ocr_binarized_min_dim: int
     azure_preset_label: str
     azure_preset_endpoint: str
+    azure_preset_layout_endpoint: str
     azure_preset_key: str
     mlflow_tracking_uri: str
     mlflow_experiment_name: str
@@ -114,6 +115,7 @@ def get_settings() -> Settings:
         ocr_binarized_min_dim=max(0, _env_int("OCR_BINARIZED_MIN_DIM", 1800)),
         azure_preset_label=os.getenv("AZURE_PRESET_LABEL", "").strip(),
         azure_preset_endpoint=os.getenv("AZURE_PRESET_ENDPOINT", "").strip(),
+        azure_preset_layout_endpoint=os.getenv("AZURE_PRESET_LAYOUT_ENDPOINT", "").strip(),
         azure_preset_key=os.getenv("AZURE_PRESET_KEY", "").strip(),
         mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "").strip(),
         mlflow_experiment_name=os.getenv("MLFLOW_EXPERIMENT_NAME", "ocr-demo").strip(),

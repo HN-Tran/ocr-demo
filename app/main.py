@@ -181,6 +181,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             context={
                 "compare_engines": compare_available_engines(),
                 "azure_preset_label": settings.azure_preset_label,
+                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint else "",
                 "static_version": version,
                 "app_base_path": app_base_path,
             },
