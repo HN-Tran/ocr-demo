@@ -49,6 +49,19 @@
   gap: 0.4rem;
 }
 
+.bench-drop-zone {
+  min-height: 3rem;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  padding: 0.5rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.bench-drop-zone.bench-drop-active {
+  border-color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
+}
+
 .bench-file-row {
   display: grid;
   grid-template-columns: 1fr 2fr;

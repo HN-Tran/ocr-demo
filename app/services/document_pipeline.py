@@ -784,7 +784,10 @@ class DocumentPipeline:
             pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             buf = io.BytesIO()
             pil_img.save(buf, format="PNG")
-            pages.append((pil_img, buf.getvalue()))
+            png_bytes = buf.getvalue()
+            pages.append((pil_img, png_bytes))
+            if content_type in {"image/tif", "image/tiff", "image/x-tiff"}:
+                raw_page_images = [png_bytes]
 
         # Get layout detector
         detector = self._get_detector(selected_layout_model, expert_layout_threshold)

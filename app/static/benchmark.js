@@ -58,8 +58,10 @@ async function loadModels() {
   }
 }
 
-fileEl.addEventListener("change", async () => {
-  pickedFiles = Array.from(fileEl.files || []);
+fileEl.addEventListener("change", () => handleFiles(fileEl.files || []));
+
+async function handleFiles(files) {
+  pickedFiles = Array.from(files);
   fileListEl.innerHTML = pickedFiles
     .map(
       (f, i) => `
@@ -69,7 +71,6 @@ fileEl.addEventListener("change", async () => {
       </div>`,
     )
     .join("");
-
   for (let i = 0; i < pickedFiles.length; i++) {
     const f = pickedFiles[i];
     if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
@@ -87,6 +88,17 @@ fileEl.addEventListener("change", async () => {
       } catch (_) {}
     }
   }
+}
+
+fileListEl.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  fileListEl.classList.add("bench-drop-active");
+});
+fileListEl.addEventListener("dragleave", () => fileListEl.classList.remove("bench-drop-active"));
+fileListEl.addEventListener("drop", (e) => {
+  e.preventDefault();
+  fileListEl.classList.remove("bench-drop-active");
+  if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
 });
 
 cancelBtn?.addEventListener("click", () => {
