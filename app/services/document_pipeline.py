@@ -577,8 +577,6 @@ class DocumentPipeline:
         # Die Bboxes werden danach wieder auf die Originalauflösung skaliert,
         # damit die Per-Region-OCR auf dem hochaufgelösten Bild crops macht.
         layout_image = image
-        layout_scale_x = 1.0
-        layout_scale_y = 1.0
         if max(image.size) > self.layout_max_dim:
             ratio = self.layout_max_dim / max(image.size)
             new_size = (
@@ -586,36 +584,9 @@ class DocumentPipeline:
                 max(1, int(image.size[1] * ratio)),
             )
             layout_image = image.resize(new_size, Image.Resampling.LANCZOS)
-            layout_scale_x = image.size[0] / new_size[0]
-            layout_scale_y = image.size[1] / new_size[1]
 
         detection_results = detector.process([layout_image])
         raw_regions = detection_results[0] if detection_results else []
-
-        if layout_scale_x != 1.0 or layout_scale_y != 1.0:
-            for region in raw_regions:
-                if not isinstance(region, dict):
-                    continue
-                bbox = region.get("bbox_2d")
-                if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
-                    region["bbox_2d"] = [
-                        float(bbox[0]) * layout_scale_x,
-                        float(bbox[1]) * layout_scale_y,
-                        float(bbox[2]) * layout_scale_x,
-                        float(bbox[3]) * layout_scale_y,
-                    ]
-                polygon = region.get("polygon")
-                if isinstance(polygon, (list, tuple)) and polygon:
-                    if isinstance(polygon[0], (list, tuple)):
-                        region["polygon"] = [
-                            [float(pt[0]) * layout_scale_x, float(pt[1]) * layout_scale_y]
-                            for pt in polygon
-                        ]
-                    elif len(polygon) >= 8:
-                        region["polygon"] = [
-                            float(p) * (layout_scale_x if i % 2 == 0 else layout_scale_y)
-                            for i, p in enumerate(polygon)
-                        ]
 
         regions = _sort_reading_order(raw_regions)
 
