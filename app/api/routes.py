@@ -1790,6 +1790,23 @@ async def benchmark_create(
     return {"job_id": job.id, "status": job.status, "progress_total": job.progress_total}
 
 
+@router.post("/benchmark/extract-text")
+async def benchmark_extract_text(
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    content = await file.read()
+    if not content:
+        return {"text": ""}
+    try:
+        ctype = _resolve_effective_content_type(file.content_type, content)
+    except HTTPException:
+        return {"text": ""}
+    if ctype != "application/pdf":
+        return {"text": ""}
+    text = await asyncio.to_thread(_extract_pdf_text, content)
+    return {"text": text}
+
+
 @router.get("/benchmark/{job_id}")
 async def benchmark_get(
     job_id: str,

@@ -58,7 +58,7 @@ async function loadModels() {
   }
 }
 
-fileEl.addEventListener("change", () => {
+fileEl.addEventListener("change", async () => {
   pickedFiles = Array.from(fileEl.files || []);
   fileListEl.innerHTML = pickedFiles
     .map(
@@ -69,6 +69,24 @@ fileEl.addEventListener("change", () => {
       </div>`,
     )
     .join("");
+
+  for (let i = 0; i < pickedFiles.length; i++) {
+    const f = pickedFiles[i];
+    if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+      try {
+        const fd = new FormData();
+        fd.append("file", f);
+        const resp = await fetch(`${appBasePath}/api/benchmark/extract-text`, { method: "POST", body: fd });
+        if (resp.ok) {
+          const { text } = await resp.json();
+          if (text) {
+            const ta = fileListEl.querySelector(`textarea[data-ref-index="${i}"]`);
+            if (ta) ta.value = text;
+          }
+        }
+      } catch (_) {}
+    }
+  }
 });
 
 cancelBtn?.addEventListener("click", () => {
