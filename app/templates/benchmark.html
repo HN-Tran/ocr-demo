@@ -32,6 +32,12 @@
           <fieldset>
             <legend>Externe Engines</legend>
             <div id="bench-engines" class="bench-checkbox-list">
+              {% if azure_preset_label %}
+              <label>
+                <input type="checkbox" name="engine" value="azure_preset" />
+                {{ azure_preset_label }}
+              </label>
+              {% endif %}
               {% for eng in compare_engines %}
               <label>
                 <input type="checkbox" name="engine" value="{{ eng.name }}" />

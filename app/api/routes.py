@@ -1753,10 +1753,31 @@ async def benchmark_create(
             if extracted.strip():
                 final_references[i] = extracted
 
+    _BACKEND_LABELS = {"expert": "Layout", "direct": "Plain"}
     runners: list[_LocalModelRunner | _EngineRunner] = []
-    for model_name in model_list:
-        runners.append(_LocalModelRunner(label=model_name, model=model_name, pipeline=pipeline))
+    for entry in model_list:
+        parts = entry.split("::", 1)
+        model_name = parts[0].strip()
+        backend_override = parts[1].strip() if len(parts) > 1 else None
+        suffix = f" ({_BACKEND_LABELS[backend_override]})" if backend_override in _BACKEND_LABELS else ""
+        runners.append(_LocalModelRunner(
+            label=f"{model_name}{suffix}",
+            model=model_name,
+            backend=backend_override,
+            pipeline=pipeline,
+        ))
     for engine_name in engine_list:
+        if engine_name == "azure_preset":
+            if not settings.azure_preset_endpoint or not settings.azure_preset_key:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Azure-Preset ist nicht konfiguriert (AZURE_PRESET_ENDPOINT / AZURE_PRESET_KEY fehlen).",
+                )
+            preset_config = {**engine_config, "azure_endpoint": settings.azure_preset_endpoint, "azure_key": settings.azure_preset_key}
+            engine = build_compare_engine("azure", preset_config, verify_ssl=settings.verify_ssl, pipeline=pipeline)
+            label = settings.azure_preset_label or engine.label
+            runners.append(_EngineRunner(label=label, engine=engine))
+            continue
         try:
             engine = build_compare_engine(
                 engine_name,

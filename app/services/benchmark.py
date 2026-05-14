@@ -127,6 +127,7 @@ class _LocalModelRunner:
     label: str
     model: str
     pipeline: OCRBackendRouter
+    backend: str | None = None
 
     kind = "local_model"
 
@@ -134,7 +135,7 @@ class _LocalModelRunner:
         self, image_bytes: bytes, content_type: str
     ) -> tuple[str, list[dict[str, Any]], list[str], float | None]:
         result, _selected = await self.pipeline.run(
-            backend=None,
+            backend=self.backend,
             image_bytes=image_bytes,
             content_type=content_type,
             mode="plain",

@@ -62,9 +62,48 @@
   background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
 }
 
+.bench-drop-hint {
+  margin: 0;
+  padding: 0.6rem 0.4rem;
+  color: var(--text-muted, #888);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.bench-drop-label {
+  cursor: pointer;
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
+}
+
+.bench-file-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+  padding: 0 0.2rem;
+  align-self: center;
+}
+
+.bench-file-delete:hover {
+  color: var(--danger, #ef4444);
+}
+
+.bench-model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bench-model-name {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
 .bench-file-row {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: 1fr 2fr auto;
   gap: 0.5rem;
   align-items: start;
   padding: 0.4rem 0.55rem;

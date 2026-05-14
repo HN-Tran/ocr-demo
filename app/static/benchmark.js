@@ -50,7 +50,11 @@ async function loadModels() {
     modelsEl.innerHTML = models
       .map(
         (m) =>
-          `<label><input type="checkbox" name="model" value="${escapeHtml(m)}" /> ${escapeHtml(m)}</label>`,
+          `<div class="bench-model-row">
+            <span class="bench-model-name">${escapeHtml(m)}</span>
+            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::expert" /> Layout</label>
+            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::direct" /> Plain</label>
+          </div>`,
       )
       .join("");
   } catch (err) {
@@ -58,20 +62,41 @@ async function loadModels() {
   }
 }
 
-fileEl.addEventListener("change", () => handleFiles(fileEl.files || []));
+fileEl.addEventListener("change", () => addFiles(fileEl.files || []));
 
-async function handleFiles(files) {
-  pickedFiles = Array.from(files);
-  fileListEl.innerHTML = pickedFiles
+const DROP_HINT = `<p class="bench-drop-hint">Bilder, PDFs, Word- oder ZIP-Dateien hier ablegen oder <label for="bench-files" class="bench-drop-label">auswählen</label></p>`;
+
+function renderFileList() {
+  const hint = pickedFiles.length ? "" : DROP_HINT;
+  const rows = pickedFiles
     .map(
       (f, i) => `
-      <div class="bench-file-row">
+      <div class="bench-file-row" data-file-index="${i}">
         <div class="bench-file-name">${escapeHtml(f.name)}</div>
         <textarea data-ref-index="${i}" placeholder="Optionaler Referenztext für CER/WER…"></textarea>
+        <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
       </div>`,
     )
     .join("");
-  for (let i = 0; i < pickedFiles.length; i++) {
+  fileListEl.innerHTML = hint + rows;
+  fileListEl.querySelectorAll(".bench-file-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.deleteIndex, 10);
+      pickedFiles.splice(idx, 1);
+      renderFileList();
+    });
+  });
+}
+
+async function addFiles(files) {
+  const incoming = Array.from(files);
+  const existingNames = new Set(pickedFiles.map((f) => f.name));
+  const newFiles = incoming.filter((f) => !existingNames.has(f.name));
+  const startIdx = pickedFiles.length;
+  pickedFiles.push(...newFiles);
+  renderFileList();
+
+  for (let i = startIdx; i < pickedFiles.length; i++) {
     const f = pickedFiles[i];
     if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
       try {
@@ -90,6 +115,8 @@ async function handleFiles(files) {
   }
 }
 
+renderFileList();
+
 fileListEl.addEventListener("dragover", (e) => {
   e.preventDefault();
   fileListEl.classList.add("bench-drop-active");
@@ -98,7 +125,7 @@ fileListEl.addEventListener("dragleave", () => fileListEl.classList.remove("benc
 fileListEl.addEventListener("drop", (e) => {
   e.preventDefault();
   fileListEl.classList.remove("bench-drop-active");
-  if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+  if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
 });
 
 cancelBtn?.addEventListener("click", () => {

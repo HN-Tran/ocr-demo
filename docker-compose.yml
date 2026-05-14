@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     environment:
       APP_BASE_PATH: ${APP_BASE_PATH:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://172.17.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-glm-ocr:latest}
       OCR_BACKEND: ${OCR_BACKEND:-expert}
       OCR_EXPERT_ENABLE_LAYOUT: ${OCR_EXPERT_ENABLE_LAYOUT:-true}
@@ -18,21 +18,21 @@ services:
       OCR_WORD_DETECTOR: ${OCR_WORD_DETECTOR:-doctr}
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       FLAGS_use_mkldnn: "0"
-    depends_on:
-      ollama:
-        condition: service_started
+#    depends_on:
+#      ollama:
+#        condition: service_started
 
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
-      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
-      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
-    gpus: ${OLLAMA_GPU_DEVICES:-all}
-    volumes:
-      - ollama_data:/root/.ollama
+#  ollama:
+#    image: ollama/ollama:latest
+#    ports:
+#      - "11434:11434"
+#    environment:
+#      OLLAMA_HOST: 0.0.0.0:11434
+#      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+#      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+#    gpus: ${OLLAMA_GPU_DEVICES:-all}
+#    volumes:
+#      - ollama_data:/root/.ollama
 
   test:
     build:
@@ -45,5 +45,5 @@ services:
       mypy app eval tests &&
       pytest -q"
 
-volumes:
-  ollama_data:
+#volumes:
+#  ollama_data:
