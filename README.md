@@ -1,25 +1,27 @@
+[English](README.md) · [Deutsch](README_DE.md)
+
 # OCR-Demo (Ollama + FastAPI)
 
-Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive schlanker Weboberfläche und Evaluations-Runner.
+Minimal OCR demo with an Ollama vision model via a FastAPI backend, including a lightweight web interface and evaluation runner.
 
-## Funktionen
+## Features
 
-- `POST /api/ocr` für Klartext- oder strukturierte Extraktion
-- `POST /api/compare` für Side-by-Side-Vergleich gegen externe Engines (Azure, OCR-Demo-Peer, Google Vision, Plain-Text-Endpoint) inklusive Metriken-Panel und optionalem CER/WER gegen Referenztext
-- `POST /api/benchmark` für Batch-Benchmarks (N Dateien × M Runner) mit Live-Progress, CSV-Export und optionalem MLflow-Tracking
-- `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
-- `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
-- `GET /docs` (Swagger UI) und `GET /redoc` (ReDoc) für die interaktive API-Dokumentation
-- Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen JSON-Vorgaben (Rechnung, Beleg, Tabelle, Visitenkarte), Hell/Dunkel-Modus, Bild/PDF-Vorschau, JSON-Highlighting und CSV-Download für Tabellen
-- Wort-Polygon-Overlay im Layout-Viewer (`OCR_WORD_DETECTOR=paddleocr|doctr`): wortgenaue Bounding-Polygone pro Layout-Region
-- Evaluations-Runner mit CER/WER und Feldgenauigkeit
+- `POST /api/ocr` for plain-text or structured extraction
+- `POST /api/compare` for side-by-side comparison against external engines (Azure, OCR-Demo-Peer, Google Vision, Plain-Text-Endpoint) including a metrics panel and optional CER/WER against reference text
+- `POST /api/benchmark` for batch benchmarks (N files × M runners) with live progress, CSV export, and optional MLflow tracking
+- `GET /api/models` to list available Ollama models
+- `GET /api/schemas` to display supported structured schemas
+- `GET /docs` (Swagger UI) and `GET /redoc` (ReDoc) for interactive API documentation
+- Browser UI at `/` with centered start card, drag-and-drop upload, auto-run on file selection, expert options, quick JSON presets (invoice, receipt, table, business card), light/dark mode, image/PDF preview, JSON highlighting, and CSV download for tables
+- Word polygon overlay in the layout viewer (`OCR_WORD_DETECTOR=paddleocr|doctr`): word-precise bounding polygons per layout region
+- Evaluation runner with CER/WER and field accuracy
 
-## Anforderungen
+## Requirements
 
 - Python 3.12+
 - `uv` 0.10+
-- Laufende Ollama-Instanz (Standard: `http://localhost:11434`)
-- Ein vision-fähiges Modell in Ollama
+- Running Ollama instance (default: `http://localhost:11434`)
+- A vision-capable model in Ollama
 
 ## Setup
 
@@ -27,7 +29,7 @@ Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive
 uv sync --all-groups
 ```
 
-Optionale Umgebungsvariablen:
+Optional environment variables:
 
 ```bash
 export OLLAMA_BASE_URL="http://localhost:11434"
@@ -42,41 +44,34 @@ export OCR_EXPERT_OCR_API_PORT="11434"
 export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
 export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
-export MAX_IMAGE_DIM="2048"               # Obergrenze für OCR-Bildgröße
-export OCR_EXPERT_LAYOUT_MAX_DIM="1800"   # Layout-Detektor sieht max. so groß
-export OCR_BINARIZED_MIN_DIM="1800"       # 1-bit/L-Eingaben werden mind. so groß
-export BENCHMARK_MAX_FILES="50"          # /api/benchmark Hard-Cap
-export BENCHMARK_MAX_RUNNERS="5"         # /api/benchmark Hard-Cap
-export MLFLOW_TRACKING_URI=""            # leer = kein Tracking; HTTP- oder file:-URI
+export MAX_IMAGE_DIM="2048"               # Upper limit for OCR image size
+export OCR_EXPERT_LAYOUT_MAX_DIM="1800"   # Layout detector sees at most this size
+export OCR_BINARIZED_MIN_DIM="1800"       # 1-bit/L inputs are upscaled to at least this size
+export BENCHMARK_MAX_FILES="50"           # /api/benchmark hard cap
+export BENCHMARK_MAX_RUNNERS="5"          # /api/benchmark hard cap
+export MLFLOW_TRACKING_URI=""             # empty = no tracking; HTTP or file: URI
 export MLFLOW_EXPERIMENT_NAME="ocr-demo"
 ```
 
-Eingabe-Preprocessing (in `app/services/ocr_pipeline.py`):
+Input preprocessing (in `app/services/ocr_pipeline.py`):
 
-- RGBA/LA und transparente Palette-PNGs werden auf **weißem** Hintergrund komponiert (vermeidet schwarze Defaults, die schwarzen Text auf transparentem Hintergrund unsichtbar machen würden).
-- Bitonale (`1`) und Graustufen (`L`) Eingaben werden auf mindestens
-  `OCR_BINARIZED_MIN_DIM` Pixel (Standard 1800) hochskaliert, damit Modelle
-  „l"/„I"/„1" zuverlässiger unterscheiden können.
-- Im Expert-Backend wird das Bild vor dem Layout-Detektor zusätzlich auf
-  `OCR_EXPERT_LAYOUT_MAX_DIM` (Standard 1800) heruntergeskaliert. Die
-  Bounding-Boxes werden danach wieder auf die Originalauflösung skaliert,
-  sodass die Per-Region-OCR weiterhin auf dem hochaufgelösten Bild arbeitet.
+- RGBA/LA and transparent palette PNGs are composited onto a **white** background (avoids black defaults that would make black text on a transparent background invisible).
+- Bitonal (`1`) and grayscale (`L`) inputs are upscaled to at least `OCR_BINARIZED_MIN_DIM` pixels (default 1800) so models can more reliably distinguish `l`/`I`/`1`.
+- In the expert backend, the image is additionally downscaled to `OCR_EXPERT_LAYOUT_MAX_DIM` (default 1800) before the layout detector. Bounding boxes are then rescaled back to the original resolution so that per-region OCR continues to work on the high-resolution image.
 
-## Starten
+## Start
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-Öffnen: `http://127.0.0.1:8000`
+Open: `http://127.0.0.1:8000`
 
 ## API
 
-`POST /api/ocr` akzeptiert entweder `multipart/form-data` oder einen rohen Body mit
-`Content-Type: application/octet-stream`.
+`POST /api/ocr` accepts either `multipart/form-data` or a raw body with `Content-Type: application/octet-stream`.
 
-Zusätzlich gibt es eine Azure-Read-kompatible Oberfläche für das Container-Swagger aus
-`swagger.json`:
+In addition, there is an Azure-Read-compatible interface for the container Swagger from `swagger.json`:
 
 - `GET /status`
 - `GET /ready`
@@ -86,40 +81,37 @@ Zusätzlich gibt es eine Azure-Read-kompatible Oberfläche für das Container-Sw
 - `POST /formrecognizer/documentModels/prebuilt-read:analyze`
 - `GET /formrecognizer/documentModels/prebuilt-read/analyzeResults/{resultId}`
 
-Kompatibilitäts-Hinweise:
+Compatibility notes:
 
-- `api-version=2022-08-31` ist erforderlich.
-- `application/octet-stream` und `application/json` mit `{"urlSource":"..."}` werden akzeptiert.
-- `:analyze` liefert `202` plus `Operation-Location`; die Verarbeitung läuft im Hintergrund und wird im Analyze-Store für Polling bereitgestellt.
-- Analyze-Ergebnisse werden zusätzlich im Dateisystem unter `ANALYZE_STORE_DIR` persistiert, damit Polling nach einem Prozessneustart auf demselben Volume weiter funktioniert.
-- `pages` und `stringIndexType` werden akzeptiert; `pages` filtert aktuell nur das Antwort-Payload, nicht die eigentliche OCR-Ausführung.
-- `modelId` ist auf `prebuilt-read` begrenzt.
-- `pages`, `paragraphs`, `lines`, `words` und `spans` werden jetzt best-effort aus OCR-Text und Layoutdaten gefüllt. `textElements` bleibt dabei eine pragmatische Annäherung, keine vollständige Grapheme-Cluster-Implementierung.
-- `pages[].words` nutzt — sobald `OCR_WORD_DETECTOR=doctr|paddleocr` aktiv ist und der Detektor Wort-Polygone geliefert hat — die echten Detektor-Boxen (gleiche Daten wie der „Wörter"-Tab im Browser) statt der synthetischen Wort-Wrapper aus den Layout-Regionen. Ohne Detektor bleibt der bisherige Fallback erhalten.
+- `api-version=2022-08-31` is required.
+- `application/octet-stream` and `application/json` with `{"urlSource":"..."}` are accepted.
+- `:analyze` returns `202` plus `Operation-Location`; processing runs in the background and is stored in the analyze store for polling.
+- Analyze results are additionally persisted on the filesystem under `ANALYZE_STORE_DIR` so polling continues to work after a process restart on the same volume.
+- `pages` and `stringIndexType` are accepted; `pages` currently only filters the response payload, not the actual OCR execution.
+- `modelId` is limited to `prebuilt-read`.
+- `pages`, `paragraphs`, `lines`, `words`, and `spans` are now best-effort populated from OCR text and layout data. `textElements` remains a pragmatic approximation, not a complete grapheme cluster implementation.
+- `pages[].words` uses — when `OCR_WORD_DETECTOR=doctr|paddleocr` is active and the detector provided word polygons — the real detector boxes (same data as the "Words" tab in the browser) instead of the synthetic word wrappers from layout regions. Without a detector the previous fallback remains.
 
-Multipart-Felder:
+Multipart fields:
 
-- `file`: Bild, PDF oder Word-Dokument (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
-- `mode`: `plain` oder `structured`
-- `schema_name`: erforderlich bei `mode=structured`
-- `backend`: optional `direct` oder `expert` (UI: Direct/Dev, Standard aus `OCR_BACKEND`)
-- `model`: optionale Modell-Überschreibung
-- `token_limit`: optionale Token-/Kontextgrenze (`1..128000`), wird als Ollama-`num_ctx` gesetzt
-- `gif_max_frames`: optionales Frame-Limit für animierte GIFs (`1..32`, Standard: `8`)
-- `expert_enable_layout`: optionales Layout-Override für `backend=expert` (`true|false`)
-- `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
-- `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
+- `file`: image, PDF, or Word document (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
+- `mode`: `plain` or `structured`
+- `schema_name`: required for `mode=structured`
+- `backend`: optional `direct` or `expert` (UI: Direct/Dev, default from `OCR_BACKEND`)
+- `model`: optional model override
+- `token_limit`: optional token/context limit (`1..128000`), set as Ollama `num_ctx`
+- `gif_max_frames`: optional frame limit for animated GIFs (`1..32`, default: `8`)
+- `expert_enable_layout`: optional layout override for `backend=expert` (`true|false`)
+- `task`: plain-text task preset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
+- `custom_prompt`: optional plain-text prompt, takes precedence over `task`
 
-Raw-Upload (`application/octet-stream`):
+Raw upload (`application/octet-stream`):
 
-- Der Request-Body enthält direkt die Datei-Bytes.
-- `mode`, `schema_name`, `backend`, `model`, `token_limit`, `gif_max_frames`,
-  `expert_enable_layout`, `task` und `custom_prompt` können als Query-Parameter
-  übergeben werden.
-- Der Server erkennt `png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc` und `docx` anhand der
-  Dateisignatur automatisch. Word-Dokumente werden intern via LibreOffice in PDF konvertiert.
+- The request body contains the file bytes directly.
+- `mode`, `schema_name`, `backend`, `model`, `token_limit`, `gif_max_frames`, `expert_enable_layout`, `task`, and `custom_prompt` can be passed as query parameters.
+- The server automatically detects `png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, and `docx` from the file signature. Word documents are internally converted to PDF via LibreOffice.
 
-PowerShell-Beispiel:
+PowerShell example:
 
 ```powershell
 Invoke-RestMethod -Method POST `
@@ -128,35 +120,35 @@ Invoke-RestMethod -Method POST `
   -InFile 'C:\path\scan.tiff'
 ```
 
-Beispiele für `schema_name`:
+Example `schema_name` values:
 
-- `auto` (Schema wird automatisch erkannt)
+- `auto` (schema is detected automatically)
 - `invoice_basic`
 - `receipt_basic`
 - `table_basic`
 - `business_card_basic`
 
-Hinweis: Bei PDF-Dateien werden alle Seiten verarbeitet.
-Hinweis: Animierte GIFs werden als Mehrseiten-Eingabe behandelt; bis zu 8 Frames werden gleichmäßig gesampelt verarbeitet.
-Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Storyboard aus Sample-Frames in einem Einzelaufruf beschrieben.
-Hinweis: `backend=expert` nutzt GLM-OCR primär für `mode=plain` + `task=ocr_text`; für andere Aufgaben fällt die App auf den Direct-Pfad zurück.
-Hinweis: Expert/Dev läuft in dieser App nur im Self-Hosted-Modus (`OCR_EXPERT_MODE=selfhosted`).
-Hinweis: Bei `backend=expert` kann die Antwort zusätzlich `markdown` enthalten; die UI rendert daraus eine sichere Vorschau, behält aber `text` als Rohausgabe bei.
-Hinweis: Das Layout-Modell ist über `OCR_EXPERT_LAYOUT_MODEL` konfigurierbar (Standard: `PaddlePaddle/PP-DocLayoutV3_safetensors`) und kann pro Request via `expert_layout_model` überschrieben werden. PP-DocLayout-Modelle werden direkt von GLM-OCR geladen. Für andere HuggingFace-Object-Detection-Modelle wird automatisch ein generischer Detektor (`HFLayoutDetector`) verwendet, der `AutoModelForObjectDetection` nutzt. YOLO-basierte Modelle werden nicht unterstützt.
+Note: For PDF files, all pages are processed.
+Note: Animated GIFs are treated as multi-page input; up to 8 frames are uniformly sampled.
+Note: For `task=describe_image` with animated GIFs, a storyboard from sample frames is efficiently described in a single call.
+Note: `backend=expert` uses GLM-OCR primarily for `mode=plain` + `task=ocr_text`; for other tasks the app falls back to the direct path.
+Note: Expert/Dev only runs in self-hosted mode in this app (`OCR_EXPERT_MODE=selfhosted`).
+Note: With `backend=expert`, the response may additionally contain `markdown`; the UI renders a safe preview of it but keeps `text` as raw output.
+Note: The layout model is configurable via `OCR_EXPERT_LAYOUT_MODEL` (default: `PaddlePaddle/PP-DocLayoutV3_safetensors`) and can be overridden per request via `expert_layout_model`. PP-DocLayout models are loaded directly by GLM-OCR. For other HuggingFace object detection models, a generic detector (`HFLayoutDetector`) is used automatically, which uses `AutoModelForObjectDetection`. YOLO-based models are not supported.
 
-Verfügbare Layout-Modelle:
+Available layout models:
 
-| Modell | Architektur | Polygone | Stärken | Einschränkungen |
+| Model | Architecture | Polygons | Strengths | Limitations |
 |---|---|---|---|---|
-| `PaddlePaddle/PP-DocLayoutV3_safetensors` (Standard) | PP-DocLayout V3 mit Instanz-Segmentierung (nativ in GLM-OCR) | Echte Polygone aus Segmentierungsmasken, variable Punktanzahl, konturgetreu | Beste Genauigkeit für nicht-planare Dokumente (schräg, gebogen, Handyfoto), viele Kategorien, Lesereihenfolge | Nur über GLM-OCR-Pipeline nutzbar |
-| `pascalrai/Deformable-DETR-Document-Layout-Analysis` | Deformable DETR (reine Objekterkennung, keine Segmentierung) | Nur achsenparallele Bounding-Boxen (4-Punkt-Rechtecke) | Trainiert auf DocLayNet (mAP 0.61), gute Tabellen-/Texterkennung | Benötigt `timm`; keine echten Polygone möglich (architekturbedingt) |
-| `Aryn/deformable-detr-DocLayNet` | Deformable DETR (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Trainiert auf DocLayNet, alternative Gewichtung | Benötigt `timm`; keine echten Polygone möglich |
-| `docling-project/docling-layout-heron` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Schnelle Inferenz | Erkennt gescannte Seiten oft als einzelne „Picture"-Region; keine echten Polygone möglich |
-| `docling-project/docling-layout-heron-101` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Größere Variante von Heron | Gleiche Einschränkungen wie Heron |
+| `PaddlePaddle/PP-DocLayoutV3_safetensors` (default) | PP-DocLayout V3 with instance segmentation (native in GLM-OCR) | True polygons from segmentation masks, variable point count, contour-accurate | Best accuracy for non-planar documents (tilted, curved, phone photo), many categories, reading order | Only usable via GLM-OCR pipeline |
+| `pascalrai/Deformable-DETR-Document-Layout-Analysis` | Deformable DETR (object detection only, no segmentation) | Axis-aligned bounding boxes only (4-point rectangles) | Trained on DocLayNet (mAP 0.61), good table/text detection | Requires `timm`; no true polygons possible (architecture limitation) |
+| `Aryn/deformable-detr-DocLayNet` | Deformable DETR (object detection only) | Axis-aligned bounding boxes only | Trained on DocLayNet, alternative weights | Requires `timm`; no true polygons possible |
+| `docling-project/docling-layout-heron` | RT-DETRv2 (object detection only) | Axis-aligned bounding boxes only | Fast inference | Often detects scanned pages as a single "Picture" region; no true polygons possible |
+| `docling-project/docling-layout-heron-101` | RT-DETRv2 (object detection only) | Axis-aligned bounding boxes only | Larger variant of Heron | Same limitations as Heron |
 
-Hinweis: Für erkannte Tabellenregionen wird automatisch eine Zellstruktur-Erkennung via Microsoft Table Transformer (`table-transformer-structure-recognition-v1.1-all`) durchgeführt. Die erkannten Zellen (Zeilen × Spalten, Header, Spanning Cells) werden als `cells`-Array in der jeweiligen Layout-Region zurückgegeben.
+Note: For detected table regions, cell structure detection is automatically performed via Microsoft Table Transformer (`table-transformer-structure-recognition-v1.1-all`). The detected cells (rows × columns, headers, spanning cells) are returned as a `cells` array in the respective layout region.
 
-Response-Format:
+Response format:
 
 ```json
 {
@@ -192,7 +184,7 @@ Response-Format:
     "languages": []
   },
   "text": "...",
-  "markdown": "# Titel\n\n...",
+  "markdown": "# Title\n\n...",
   "structured": null,
   "layout": [
     {
@@ -217,101 +209,74 @@ Response-Format:
 }
 ```
 
-## Vergleich mit externer OCR-Engine
+## Comparison with External OCR Engine
 
-`POST /api/compare` führt unsere OCR-Pipeline parallel zu einer externen Engine
-aus und liefert Diff, Side-by-Side-Metriken und (optional) CER/WER gegen einen
-Referenztext. `GET /api/compare/engines` listet die unterstützten Engines.
+`POST /api/compare` runs our OCR pipeline in parallel with an external engine and returns a diff, side-by-side metrics, and (optionally) CER/WER against a reference text. `GET /api/compare/engines` lists the supported engines.
 
-**Unterstützte Engines** (`engine`-Form-Feld):
+**Supported engines** (`engine` form field):
 
-| `engine` | Konfigurations-Felder | Bemerkungen |
+| `engine` | Configuration fields | Notes |
 |---|---|---|
-| `azure` | `azure_endpoint`, `azure_key` | Azure Form Recognizer / Document Intelligence prebuilt-read. Nutzt asynchrones Polling. |
-| `self_peer` | `peer_base_url`, `peer_backend` | Postet die Datei an `<peer_base_url>/api/ocr` einer anderen Instanz dieser App — sinnvoll, um zwei Konfigurationen oder Modellversionen direkt zu vergleichen. |
+| `azure` | `azure_endpoint`, `azure_key` | Azure Form Recognizer / Document Intelligence prebuilt-read. Uses async polling. |
+| `self_peer` | `peer_base_url`, `peer_backend` | Posts the file to `<peer_base_url>/api/ocr` of another instance of this app — useful for comparing two configurations or model versions directly. |
 | `google_vision` | `google_api_key` | Google Cloud Vision REST (`DOCUMENT_TEXT_DETECTION`). |
-| `plain_text` | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` | Generischer Endpoint, der entweder reinen Text oder `{"text": "..."}` liefert. Liefert keine Bounding-Boxen, Diff bleibt textbasiert. |
+| `plain_text` | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` | Generic endpoint that returns either plain text or `{"text": "..."}`. Provides no bounding boxes; diff remains text-based. |
 
-**Optionale Parameter** (engine-unabhängig):
+**Optional parameters** (engine-independent):
 
-- `reference_text`: Ground-Truth-Text. Wenn gesetzt, ergänzt die Antwort einen `metrics.reference`-Block mit echten CER, WER und Token-F1 für beide Seiten.
-- `expert_*` und `backend`: greifen für unsere eigene OCR-Seite (siehe oben).
-- `expert_compare_include_detector_only`: bezieht zusätzlich Wort-Polygone des Detektors in den Diff ein, die kein Layout-Token getroffen haben.
+- `reference_text`: Ground-truth text. When set, the response adds a `metrics.reference` block with true CER, WER, and token-F1 for both sides.
+- `expert_*` and `backend`: apply to our own OCR side (see above).
+- `expert_compare_include_detector_only`: additionally includes word polygons from the detector that did not hit a layout token in the diff.
 
-**Metriken im Response** (`metrics`-Block):
+**Metrics in response** (`metrics` block):
 
-- `intrinsic`: Tokens, Zeichen, Ø Konfidenz, Latenz pro Seite.
-- `comparison`: paarweise Δ Zeichen, Δ Wörter (normalisierte Levenshtein-Distanz — bewusst _nicht_ CER/WER, da keine Seite Ground Truth ist), Token-Jaccard, Token-Precision/Recall/F1.
-- `reference`: nur wenn `reference_text` mitgeliefert wurde — echte CER, WER, Token-F1 pro Seite.
+- `intrinsic`: tokens, characters, avg confidence, latency per page.
+- `comparison`: pairwise Δ characters, Δ words (normalized Levenshtein distance — deliberately _not_ CER/WER since neither side is ground truth), token Jaccard, token precision/recall/F1.
+- `reference`: only when `reference_text` was provided — true CER, WER, token-F1 per side.
 
-**Azure-Preset** (Browser-Workflow):
-Sind `AZURE_PRESET_LABEL`, `AZURE_PRESET_ENDPOINT` und `AZURE_PRESET_KEY` gesetzt,
-erscheint im Compare-Formular ein Schnellbutton mit dem Label. Schickt der
-Browser eine Anfrage an genau diese Endpoint-URL ohne API-Key, ergänzt der
-Server den Schlüssel intern — der geheime Wert verlässt nie das Backend.
+**Azure preset** (browser workflow):
+When `AZURE_PRESET_LABEL`, `AZURE_PRESET_ENDPOINT`, and `AZURE_PRESET_KEY` are set, the compare form shows a quick button with the label. If the browser sends a request to exactly this endpoint URL without an API key, the server adds the key internally — the secret never leaves the backend.
 
-**Warum kein AWS Textract?**
-AWS Textract ist bewusst _nicht_ enthalten, weil es eine SigV4-Signatur
-braucht und damit entweder `boto3` (~10 MB) oder eine eigene Signatur-
-Implementierung erfordert. Da keine konkrete AWS-Anforderung besteht,
-bleibt die Abhängigkeit draußen. Bei Bedarf:
+**Why no AWS Textract?**
+AWS Textract is deliberately _not_ included because it requires SigV4 signing, which requires either `boto3` (~10 MB) or a custom signing implementation. Since there is no concrete AWS requirement, the dependency stays out. To add it:
 
-1. `boto3` als optionalen Extra in `pyproject.toml` ergänzen (analog zum bestehenden `paddle`-Extra).
-2. `app/services/compare_engines/aws_textract.py` nach dem Muster der anderen Engines schreiben (Klasse mit `name`/`label`/`async def analyze`).
-3. In `app/services/compare_engines/registry.py` registrieren.
+1. Add `boto3` as an optional extra in `pyproject.toml` (analogous to the existing `paddle` extra).
+2. Write `app/services/compare_engines/aws_textract.py` following the pattern of the other engines (class with `name`/`label`/`async def analyze`).
+3. Register in `app/services/compare_engines/registry.py`.
 
-## Batch-Benchmark
+## Batch Benchmark
 
-`/benchmark` (UI) bzw. `POST /api/benchmark` führen N Dateien gegen M Runner
-aus — Runner sind entweder lokale Ollama-Modelle oder externe Engines aus
-dem Compare-Flow. Pro Zeile werden Token-/Zeichen-Anzahl, Latenz und
-(falls Referenztext mitgegeben wurde) CER/WER/Token-F1 berechnet. Aggregat
-pro Runner liefert Durchschnitt + Standardabweichung.
+`/benchmark` (UI) or `POST /api/benchmark` run N files against M runners — runners are either local Ollama models or external engines from the compare flow. Per row, token/character count, latency, and (if reference text was provided) CER/WER/token-F1 are calculated. The aggregate per runner delivers mean + standard deviation.
 
-### Wie es intern funktioniert
+### How it works internally
 
-- **In-Memory-Store** (`BenchmarkJobStore` in `app/services/benchmark.py`):
-  Ein einzelnes Python-Dict im FastAPI-Prozess hält alle Jobs. `asyncio.Lock`
-  serialisiert Mutationen; bei Prozess-Neustart sind die Jobs weg. Pro Replica
-  unabhängig — nicht für horizontales Scaling ausgelegt.
-- **Worker** (`run_benchmark_job`): wird als `asyncio.create_task(...)` im
-  POST-Handler gefeuert, läuft im Hintergrund und mutiert `job.rows` direkt.
-  Der POST kommt sofort mit `{job_id}` zurück, der Worker arbeitet weiter.
-- **Sequentiell, kein Parallelismus**: alle (Datei × Runner)-Paare werden
-  nacheinander abgearbeitet. Grund: Ollama lädt Modelle exklusiv, parallele
-  Calls thrashen den Speicher und verfälschen die Latenz-Messung. Externe
-  Engines liefen *könnten* parallel laufen — bisher nicht implementiert,
-  weil Latenz-Vergleichbarkeit wichtiger ist als Wall-Clock-Zeit.
-- **Tracking**: jede Zeile (`BenchmarkRow`) bekommt Status `pending → running
-  → done/error`, plus Metriken sobald der Runner zurückkommt. Das Frontend
-  pollt `GET /api/benchmark/{id}` alle 2 s — das Polling ist eine
-  Browser-Convenience, der Backend pusht nichts. Bei MLflow wird zusätzlich
-  ein verschachtelter Run pro Zeile geschrieben (siehe unten).
-- **Persistenz**: drei Schichten, jede opt-in.
-  - In-Memory: bis zum nächsten Restart.
-  - CSV: `GET /api/benchmark/{id}/csv` als Anhang herunterladen.
-  - MLflow: bei gesetztem `MLFLOW_TRACKING_URI` zusätzliches Logging mit
-    Artefakten und Parent/Child-Run-Hierarchie.
+- **In-memory store** (`BenchmarkJobStore` in `app/services/benchmark.py`): A single Python dict in the FastAPI process holds all jobs. `asyncio.Lock` serializes mutations; jobs are lost on process restart. Independent per replica — not designed for horizontal scaling.
+- **Worker** (`run_benchmark_job`): fired as `asyncio.create_task(...)` in the POST handler, runs in the background, and mutates `job.rows` directly. The POST returns immediately with `{job_id}`; the worker continues in the background.
+- **Sequential, no parallelism**: all (file × runner) pairs are processed one after another. Reason: Ollama loads models exclusively; parallel calls thrash memory and skew latency measurements. External engines _could_ run in parallel — not implemented yet because latency comparability is more important than wall-clock time.
+- **Tracking**: each row (`BenchmarkRow`) gets status `pending → running → done/error`, plus metrics as soon as the runner responds. The frontend polls `GET /api/benchmark/{id}` every 2 s — polling is a browser convenience; the backend pushes nothing. With MLflow, an additional nested run per row is written (see below).
+- **Persistence**: three layers, each opt-in.
+  - In-memory: until next restart.
+  - CSV: download via `GET /api/benchmark/{id}/csv`.
+  - MLflow: with `MLFLOW_TRACKING_URI` set, additional logging with artifacts and parent/child run hierarchy.
 
-### Job-Lifecycle
+### Job Lifecycle
 
 ```
 POST   /api/benchmark              → { job_id }
 GET    /api/benchmark              → { jobs: [...] }
-GET    /api/benchmark/{job_id}     → vollständiger Job-State + Live-Progress
-GET    /api/benchmark/{job_id}/csv → CSV-Export
-DELETE /api/benchmark/{job_id}     → aus dem In-Memory-Store löschen
+GET    /api/benchmark/{job_id}     → full job state + live progress
+GET    /api/benchmark/{job_id}/csv → CSV export
+DELETE /api/benchmark/{job_id}     → remove from in-memory store
 ```
 
-Hard-Caps konfigurierbar via `BENCHMARK_MAX_FILES` (Standard 50) und
-`BENCHMARK_MAX_RUNNERS` (Standard 5).
+Hard caps configurable via `BENCHMARK_MAX_FILES` (default 50) and `BENCHMARK_MAX_RUNNERS` (default 5).
 
-### Per REST steuerbar (curl-Beispiel)
+### Controllable via REST (curl example)
 
-Browser-UI ist optional — die API ist self-contained:
+The browser UI is optional — the API is self-contained:
 
 ```bash
-# 1. Job submitten (zwei Dateien, je ein Referenztext, zwei Modelle, plus Azure)
+# 1. Submit job (two files, one reference text each, two models, plus Azure)
 JOB=$(curl -s -X POST http://localhost:8000/api/benchmark \
   -F "files=@doc1.pdf" \
   -F "files=@doc2.pdf" \
@@ -323,7 +288,7 @@ JOB=$(curl -s -X POST http://localhost:8000/api/benchmark \
   -F "azure_key=…" \
   | jq -r .job_id)
 
-# 2. Pollen bis fertig
+# 2. Poll until done
 while true; do
   status=$(curl -s "http://localhost:8000/api/benchmark/$JOB" | jq -r .status)
   echo "$status"
@@ -331,29 +296,26 @@ while true; do
   sleep 2
 done
 
-# 3. Ergebnis als CSV holen
+# 3. Fetch result as CSV
 curl -s "http://localhost:8000/api/benchmark/$JOB/csv" -o "benchmark-$JOB.csv"
 
-# 4. Aus dem Server-Speicher entfernen (optional)
+# 4. Remove from server memory (optional)
 curl -s -X DELETE "http://localhost:8000/api/benchmark/$JOB"
 ```
 
-`models` und `engines` sind kommagetrennte Listen. Mindestens einer der
-beiden Werte muss nicht leer sein. `references` muss in derselben
-Reihenfolge wie `files` mitgegeben werden — leerer String = keine Referenz
-für diese Datei.
+`models` and `engines` are comma-separated lists. At least one must be non-empty. `references` must be provided in the same order as `files` — an empty string means no reference for that file.
 
-Engine-spezifische Felder (nur die ausgewählten Engines werden bedient):
+Engine-specific fields (only the selected engines are served):
 
-| Engine          | Erforderliche Felder                                           |
-|-----------------|----------------------------------------------------------------|
-| `azure`         | `azure_endpoint`, `azure_key`                                  |
-| `self_peer`     | `peer_base_url`, optional `peer_backend`, `peer_model`         |
-| `google_vision` | `google_api_key`                                               |
-| `plain_text`    | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` |
-| `local_models`  | (nicht über Engines — siehe `models`)                          |
+| Engine | Required fields |
+|---|---|
+| `azure` | `azure_endpoint`, `azure_key` |
+| `self_peer` | `peer_base_url`, optional `peer_backend`, `peer_model` |
+| `google_vision` | `google_api_key` |
+| `plain_text` | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` |
+| `local_models` | (not via engines — see `models`) |
 
-### Antwort-Schema (`GET /api/benchmark/{job_id}`)
+### Response schema (`GET /api/benchmark/{job_id}`)
 
 ```json
 {
@@ -395,38 +357,33 @@ Engine-spezifische Felder (nur die ausgewählten Engines werden bedient):
 }
 ```
 
-### MLflow-Tracking (optional)
+### MLflow Tracking (optional)
 
-Wenn `MLFLOW_TRACKING_URI` gesetzt ist UND `mlflow` installiert wurde
-(`pip install '.[mlflow]'`), schreibt der Worker zusätzlich:
+When `MLFLOW_TRACKING_URI` is set AND `mlflow` is installed (`pip install '.[mlflow]'`), the worker additionally writes:
 
-- einen Parent-Run pro Job mit Aggregat-Metriken (`<runner>.mean_cer`, …),
-- pro (Datei, Runner) einen verschachtelten Child-Run mit Parametern,
-  Metriken und `hypothesis.txt` / `reference.txt` als Artefakten.
+- a parent run per job with aggregate metrics (`<runner>.mean_cer`, …),
+- per (file, runner) a nested child run with parameters, metrics, and `hypothesis.txt` / `reference.txt` as artifacts.
 
-Konfiguration:
+Configuration:
 
 ```bash
-export MLFLOW_TRACKING_URI=http://mlflow:5000   # oder file:./mlruns
+export MLFLOW_TRACKING_URI=http://mlflow:5000   # or file:./mlruns
 export MLFLOW_EXPERIMENT_NAME=ocr-demo          # default: "ocr-demo"
 ```
 
-Im Benchmark-UI erscheint ein „MLflow-Run öffnen"-Link, sobald der Job
-einen HTTP/HTTPS-Tracking-Server nutzt; das `mlflow.run_url`-Feld in der
-JSON-Antwort taugt fürs Verlinken aus eigenen Tools. Bei `file:`-URIs gibt
-es keine sinnvolle Browser-URL, dann bleibt das Feld `null`.
+In the benchmark UI, an "Open MLflow Run" link appears as soon as the job uses an HTTP/HTTPS tracking server; the `mlflow.run_url` field in the JSON response is useful for linking from custom tools. For `file:` URIs there is no useful browser URL, so the field remains `null`.
 
 ## Evaluation
 
-Beispielbilder nach `data/samples/` legen und `data/ground_truth/manifest.jsonl` aktualisieren.
+Place sample images in `data/samples/` and update `data/ground_truth/manifest.jsonl`.
 
 ```bash
 uv run python -m eval.run --manifest data/ground_truth/manifest.jsonl --samples-dir data/samples --reports-dir eval/reports
 ```
 
-Der Report wird unter `eval/reports/eval_report_<timestamp>.json` geschrieben.
+The report is written to `eval/reports/eval_report_<timestamp>.json`.
 
-## Qualitätsprüfungen
+## Quality Checks
 
 ```bash
 uv run ruff check .
@@ -435,94 +392,94 @@ uv run mypy app eval tests
 uv run pytest
 ```
 
-## Abhängigkeiten verwalten (uv)
+## Managing Dependencies (uv)
 
-Installieren/Aktualisieren und Lock-Datei erzeugen:
+Install/update and generate lock file:
 
 ```bash
 uv sync --all-groups
 uv lock
 ```
 
-Runtime-Abhängigkeit hinzufügen:
+Add a runtime dependency:
 
 ```bash
 uv add <package>
 ```
 
-Dev-Abhängigkeit hinzufügen:
+Add a dev dependency:
 
 ```bash
 uv add --dev <package>
 ```
 
-## Wort-Polygon-Detektor (optional)
+## Word Polygon Detector (optional)
 
-Der Layout-Viewer kann wortgenaue Bounding-Polygone anzeigen. Dafür wird `OCR_WORD_DETECTOR` gesetzt (Standard: `doctr`).
+The layout viewer can display word-precise bounding polygons. Set `OCR_WORD_DETECTOR` for this (default: `doctr`).
 
-| Backend | Env-Wert | Installation |
+| Backend | Env value | Installation |
 |---|---|---|
-| Kein Detektor | `none` | — |
-| DocTR (Standard) | `doctr` | in den Haupt-Dependencies enthalten |
-| PaddleOCR | `paddleocr` | `pip install ".[paddle]"` bzw. Docker-Extra `paddle` |
+| No detector | `none` | — |
+| DocTR (default) | `doctr` | included in main dependencies |
+| PaddleOCR | `paddleocr` | `pip install ".[paddle]"` or Docker extra `paddle` |
 
-Im Docker-Image ist zusätzlich das `paddle`-Extra enthalten (`pip install ".[paddle]"`).
+The Docker image additionally includes the `paddle` extra (`pip install ".[paddle]"`).
 
-Hinweise:
-- PaddleOCR erfordert Python 3.12 (keine Wheels für 3.13).
-- PaddleOCR detektiert Fließtext auf Zeilenebene; die Polygone werden proportional in Wort-Teilboxen aufgeteilt.
-- DocTR liefert nativ wortgenaue Polygone mit eigenem erkanntem Text.
+Notes:
+- PaddleOCR requires Python 3.12 (no wheels for 3.13).
+- PaddleOCR detects running text at line level; polygons are proportionally split into word sub-boxes.
+- DocTR natively delivers word-precise polygons with its own recognized text.
 
-## Docker (isoliertes Ausführen und Testen)
+## Docker (isolated execution and testing)
 
-App + Ollama bauen und starten:
+Build and start app + Ollama:
 
 ```bash
 docker compose up --build
 ```
 
-Öffnen: `http://127.0.0.1:8000`
+Open: `http://127.0.0.1:8000`
 
-GPU-Hinweise:
+GPU notes:
 
-- Compose ist für den `ollama`-Service auf NVIDIA-GPUs konfiguriert.
-- Erfordert NVIDIA-Treiber + NVIDIA Container Toolkit auf dem Host.
-- Optionale Overrides:
-  - `DEFAULT_TOKEN_LIMIT` (Standard: `16384`)
-  - `OLLAMA_GPU_DEVICES` (Standard: `all`)
-  - `NVIDIA_VISIBLE_DEVICES` (Standard: `all`)
-  - `NVIDIA_DRIVER_CAPABILITIES` (Standard: `compute,utility`)
+- Compose is configured for NVIDIA GPUs on the `ollama` service.
+- Requires NVIDIA drivers + NVIDIA Container Toolkit on the host.
+- Optional overrides:
+  - `DEFAULT_TOKEN_LIMIT` (default: `16384`)
+  - `OLLAMA_GPU_DEVICES` (default: `all`)
+  - `NVIDIA_VISIBLE_DEVICES` (default: `all`)
+  - `NVIDIA_DRIVER_CAPABILITIES` (default: `compute,utility`)
 
-OCR-Modell in Ollama laden (einmalig):
+Load the OCR model in Ollama (once):
 
 ```bash
 docker compose exec ollama ollama pull glm-ocr:latest
 ```
 
-Prüfen, ob nach einer Anfrage GPU genutzt wird:
+Check if GPU is being used after a request:
 
 ```bash
 docker compose exec ollama ollama ps
 ```
 
-Bei `PROCESSOR` sollte `GPU` statt `CPU` stehen.
+`PROCESSOR` should show `GPU` instead of `CPU`.
 
-Isolierte Qualitätsprüfungen + Tests ausführen:
+Run isolated quality checks + tests:
 
 ```bash
 docker compose --profile test run --rm test
 ```
 
-Container stoppen:
+Stop containers:
 
 ```bash
 docker compose down
 ```
 
-## Lizenz
+## License
 
-Apache-2.0 — siehe [`LICENSE`](LICENSE).
+Apache-2.0 — see [`LICENSE`](LICENSE).
 
-## Autor
+## Author
 
 HN-Tran — <https://github.com/HN-Tran>
