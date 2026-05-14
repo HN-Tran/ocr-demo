@@ -605,11 +605,17 @@ class DocumentPipeline:
                         float(bbox[3]) * layout_scale_y,
                     ]
                 polygon = region.get("polygon")
-                if isinstance(polygon, (list, tuple)) and len(polygon) >= 8:
-                    region["polygon"] = [
-                        float(p) * (layout_scale_x if i % 2 == 0 else layout_scale_y)
-                        for i, p in enumerate(polygon)
-                    ]
+                if isinstance(polygon, (list, tuple)) and polygon:
+                    if isinstance(polygon[0], (list, tuple)):
+                        region["polygon"] = [
+                            [float(pt[0]) * layout_scale_x, float(pt[1]) * layout_scale_y]
+                            for pt in polygon
+                        ]
+                    elif len(polygon) >= 8:
+                        region["polygon"] = [
+                            float(p) * (layout_scale_x if i % 2 == 0 else layout_scale_y)
+                            for i, p in enumerate(polygon)
+                        ]
 
         regions = _sort_reading_order(raw_regions)
 
