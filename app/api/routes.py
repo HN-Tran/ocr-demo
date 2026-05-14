@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import math
@@ -8,6 +9,7 @@ import re
 import subprocess
 import tempfile
 import time
+import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -140,6 +142,71 @@ def _resolve_effective_content_type(content_type: str | None, payload: bytes) ->
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Nicht unterstützter Datei-Inhaltstyp: {normalized}",
     )
+
+
+def _is_zip(payload: bytes, content_type: str | None) -> bool:
+    ct = _normalize_content_type(content_type)
+    if ct in {"application/zip", "application/x-zip-compressed", "application/x-zip"}:
+        return True
+    # PK magic but not a recognized Office format (docx/xlsx also start with PK)
+    return payload.startswith(b"PK\x03\x04") and _sniff_content_type(payload) is None
+
+
+def _extract_pdf_text(pdf_bytes: bytes) -> str:
+    """Extract embedded text layer from a PDF. Returns empty string if none."""
+    try:
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(pdf_bytes)
+        parts: list[str] = []
+        for i in range(len(doc)):
+            page = doc[i]
+            textpage = page.get_textpage()
+            text = textpage.get_text_bounded()
+            textpage.close()
+            page.close()
+            if text.strip():
+                parts.append(text.strip())
+        doc.close()
+        return "\n\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _expand_zip(zip_bytes: bytes) -> list[tuple[str, bytes, str, str]]:
+    """Expand a ZIP into (name, bytes, content_type, reference) tuples.
+
+    Files are paired with a same-stem .txt file found in the archive.
+    Unsupported file types and directories are skipped.
+    """
+    results: list[tuple[str, bytes, str, str]] = []
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        all_names = [
+            n for n in zf.namelist() if not n.startswith("__MACOSX") and not n.endswith("/")
+        ]
+        txt_map: dict[str, str] = {}
+        for name in all_names:
+            if Path(name).suffix.lower() == ".txt":
+                try:
+                    txt_map[name] = zf.read(name).decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+
+        for name in sorted(all_names):
+            if Path(name).suffix.lower() == ".txt":
+                continue
+            try:
+                content = zf.read(name)
+            except Exception:
+                continue
+            ctype = _sniff_content_type(content)
+            if ctype is None or ctype not in ALLOWED_MIME_TYPES:
+                continue
+            stem_path = str(Path(name).with_suffix(".txt"))
+            filename_ref = str(Path(Path(name).name).with_suffix(".txt"))
+            reference = txt_map.get(stem_path, txt_map.get(filename_ref, ""))
+            results.append((Path(name).name, content, ctype, reference))
+    return results
 
 
 def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
@@ -1617,11 +1684,6 @@ async def benchmark_create(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Keine Dateien hochgeladen."
         )
-    if len(files) > settings.benchmark_max_files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Maximal {settings.benchmark_max_files} Dateien pro Job.",
-        )
 
     model_list = [m.strip() for m in models.split(",") if m.strip()]
     engine_list = [e.strip() for e in engines.split(",") if e.strip()]
@@ -1651,18 +1713,45 @@ async def benchmark_create(
     }
 
     # Read all uploads into memory upfront — Phase 1 is in-memory anyway.
+    # ZIP archives are expanded; same-stem .txt files become per-file references.
+    # Form `references` apply positionally to non-ZIP uploads only.
     file_payloads: list[tuple[str, bytes, str]] = []
+    final_references: list[str] = []
+    form_ref_idx = 0
     for upload in files:
         content = await upload.read()
         if not content:
             continue
-        ctype = _resolve_effective_content_type(upload.content_type, content)
-        content, ctype = await _maybe_convert_word(content, ctype)
-        file_payloads.append((upload.filename or "datei", content, ctype))
+        if _is_zip(content, upload.content_type):
+            expanded = await asyncio.to_thread(_expand_zip, content)
+            for name, file_bytes, ctype, ref in expanded:
+                file_bytes, ctype = await _maybe_convert_word(file_bytes, ctype)
+                file_payloads.append((name, file_bytes, ctype))
+                final_references.append(ref)
+        else:
+            ctype = _resolve_effective_content_type(upload.content_type, content)
+            content, ctype = await _maybe_convert_word(content, ctype)
+            file_payloads.append((upload.filename or "datei", content, ctype))
+            form_ref = references[form_ref_idx] if form_ref_idx < len(references) else ""
+            form_ref_idx += 1
+            final_references.append(form_ref)
+
     if not file_payloads:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Alle Dateien sind leer."
         )
+    if len(file_payloads) > settings.benchmark_max_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximal {settings.benchmark_max_files} Dateien pro Job.",
+        )
+
+    # Auto-extract text layer from digitalized PDFs where no reference was provided.
+    for i, (_name, content, ctype) in enumerate(file_payloads):
+        if not final_references[i].strip() and ctype == "application/pdf":
+            extracted = await asyncio.to_thread(_extract_pdf_text, content)
+            if extracted.strip():
+                final_references[i] = extracted
 
     runners: list[_LocalModelRunner | _EngineRunner] = []
     for model_name in model_list:
@@ -1692,7 +1781,7 @@ async def benchmark_create(
         run_benchmark_job(
             job=job,
             files=file_payloads,
-            references=list(references),
+            references=final_references,
             runners=runners,
             store=store,
             mlflow_sink=mlflow_sink,
