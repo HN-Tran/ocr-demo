@@ -55,21 +55,27 @@ class AzureEngine:
         key: str,
         verify_ssl: bool = True,
         timeout_s: float = 60.0,
+        full_analyze_url: str | None = None,
     ) -> None:
-        if not endpoint:
+        if not full_analyze_url and not endpoint:
             raise ValueError("Azure-Endpunkt fehlt.")
         self._endpoint = endpoint
+        self._full_analyze_url = full_analyze_url
         self._key = key
         self._verify_ssl = verify_ssl
         self._timeout_s = timeout_s
 
     async def analyze(self, image_bytes: bytes, content_type: str) -> EngineResult:
-        url = f"{self._endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
+        if self._full_analyze_url:
+            url = self._full_analyze_url
+            params: dict[str, str] = {}
+        else:
+            url = f"{self._endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
+            params = {"api-version": AZURE_API_VERSION}
         headers = {
             "Ocp-Apim-Subscription-Key": self._key,
             "Content-Type": content_type or "application/octet-stream",
         }
-        params = {"api-version": AZURE_API_VERSION}
         async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
             resp = await client.post(url, content=image_bytes, headers=headers, params=params)
             resp.raise_for_status()

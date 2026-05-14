@@ -46,6 +46,7 @@ from app.services.compare_engines import (
     Engine,
     EngineResult,
 )
+from app.services.compare_engines.azure import AzureEngine
 from app.services.compare_engines import (
     available_engines as compare_available_engines,
 )
@@ -1773,10 +1774,14 @@ async def benchmark_create(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Azure-Preset ist nicht konfiguriert (AZURE_PRESET_ENDPOINT / AZURE_PRESET_KEY fehlen).",
                 )
-            preset_config = {**engine_config, "azure_endpoint": settings.azure_preset_endpoint, "azure_key": settings.azure_preset_key}
-            engine = build_compare_engine("azure", preset_config, verify_ssl=settings.verify_ssl, pipeline=pipeline)
-            label = settings.azure_preset_label or engine.label
-            runners.append(_EngineRunner(label=label, engine=engine))
+            preset_engine = AzureEngine(
+                endpoint="",
+                key=settings.azure_preset_key,
+                full_analyze_url=settings.azure_preset_endpoint,
+                verify_ssl=settings.verify_ssl,
+            )
+            label = settings.azure_preset_label or preset_engine.label
+            runners.append(_EngineRunner(label=label, engine=preset_engine))
             continue
         try:
             engine = build_compare_engine(
