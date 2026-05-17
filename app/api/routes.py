@@ -2665,12 +2665,10 @@ async def compare_with_engine(
         ]
         for preset_url, preset_key in preset_pairs:
             if preset_url and submitted == preset_url:
-                # Strip backend=direct so the word detector runs and returns bboxes.
-                compare_url = re.sub(r"[&?]backend=direct\b", "", preset_url)
                 engine_instance = AzureEngine(
                     endpoint="",
                     key=preset_key or "",
-                    full_analyze_url=compare_url,
+                    full_analyze_url=preset_url,
                     verify_ssl=settings.verify_ssl,
                 )
                 break

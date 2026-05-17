@@ -14,7 +14,14 @@ AZURE_API_VERSION = "2022-08-31"
 
 
 def _normalize_words_per_page(pages: list[Any]) -> list[list[dict[str, Any]]]:
-    """Normalize Azure word polygon coords from pixels to 0-1000 scale, per page."""
+    """Normalize Azure word polygon coords to 0-1000 scale, per page.
+
+    Real Azure returns pixel-space polygons; our own compat endpoint returns
+    polygons already in 0-1000 space (from the doctr word detector). Detect
+    the coordinate space per-page: if the max polygon value exceeds 1.5 and
+    the page dimensions are >> 1000, the coords are in pixel space and need
+    scaling. If they're already ≤ 1000 (or page dims equal 1000), pass through.
+    """
     result_pages: list[list[dict[str, Any]]] = []
     for page in pages:
         if not isinstance(page, dict):
@@ -28,9 +35,17 @@ def _normalize_words_per_page(pages: list[Any]) -> list[list[dict[str, Any]]]:
                 continue
             polygon = word.get("polygon", [])
             if isinstance(polygon, list) and len(polygon) >= 8:
-                norm: list[float] = [
-                    float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(polygon)
-                ]
+                floats = [float(v) for v in polygon]
+                max_val = max(abs(v) for v in floats) if floats else 0.0
+                # Already in 0-1000 space (our compat endpoint) — pass through.
+                # Pixel-space polygons from real Azure have max_val scaled to pw/ph.
+                if max_val <= 1000 and (pw > 1000 or ph > 1000):
+                    norm = floats
+                else:
+                    norm = [
+                        float(v) / (pw if i % 2 == 0 else ph) * 1000
+                        for i, v in enumerate(floats)
+                    ]
             else:
                 norm = []
             page_words.append(
@@ -66,18 +81,21 @@ class AzureEngine:
         self._timeout_s = timeout_s
 
     async def analyze(self, image_bytes: bytes, content_type: str) -> EngineResult:
-        if self._full_analyze_url:
-            url = self._full_analyze_url
-            params: dict[str, str] = {}
-        else:
-            url = f"{self._endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
-            params = {"api-version": AZURE_API_VERSION}
         headers = {
             "Ocp-Apim-Subscription-Key": self._key,
             "Content-Type": content_type or "application/octet-stream",
         }
         async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
-            resp = await client.post(url, content=image_bytes, headers=headers, params=params)
+            if self._full_analyze_url:
+                resp = await client.post(
+                    self._full_analyze_url, content=image_bytes, headers=headers
+                )
+            else:
+                url = f"{self._endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
+                resp = await client.post(
+                    url, content=image_bytes, headers=headers,
+                    params={"api-version": AZURE_API_VERSION},
+                )
             resp.raise_for_status()
             if resp.status_code == 200:
                 payload: dict[str, Any] = resp.json()
