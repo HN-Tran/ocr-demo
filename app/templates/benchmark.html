@@ -6,6 +6,13 @@
     <title>OCR-Demo · Benchmark</title>
     <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
     <link rel="stylesheet" href="{{ app_base_path }}/static/benchmark.css?v={{ static_version }}" />
+    <script>
+      (function () {
+        const saved = localStorage.getItem("ocr-demo-theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (saved === "dark" || (!saved && prefersDark)) document.documentElement.setAttribute("data-theme", "dark");
+      })();
+    </script>
   </head>
   <body data-base-path="{{ app_base_path }}">
     <main class="bench-page">
@@ -14,7 +21,10 @@
           <h1>Batch-Benchmark</h1>
           <p class="sub">N Dateien × M Runner. CER/WER/F1 wenn Referenztexte mitgegeben werden.</p>
         </div>
-        <a class="api-docs-link" href="{{ app_base_path }}/">← Zurück zur App</a>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <button id="bench-theme-toggle" class="api-docs-link" type="button" title="Farbmodus wechseln">☾</button>
+          <a class="api-docs-link" href="{{ app_base_path }}/">← Zurück zur App</a>
+        </div>
       </header>
 
       <section class="bench-config">

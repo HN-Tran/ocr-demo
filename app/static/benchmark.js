@@ -18,6 +18,23 @@ let activeJobId = null;
 let pollTimer = 0;
 const expandedRows = new Set();
 
+const themeToggleBtn = document.getElementById("bench-theme-toggle");
+themeToggleBtn?.addEventListener("click", () => {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  if (isDark) {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("ocr-demo-theme", "light");
+    themeToggleBtn.textContent = "☾";
+  } else {
+    document.documentElement.setAttribute("data-theme", "dark");
+    localStorage.setItem("ocr-demo-theme", "dark");
+    themeToggleBtn.textContent = "☀";
+  }
+});
+if (document.documentElement.getAttribute("data-theme") === "dark" && themeToggleBtn) {
+  themeToggleBtn.textContent = "☀";
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
