@@ -1823,6 +1823,7 @@ async def benchmark_create(
             runners=runners,
             store=store,
             mlflow_sink=mlflow_sink,
+            job_ttl_s=settings.benchmark_job_ttl_s,
         )
     )
     return {"job_id": job.id, "status": job.status, "progress_total": job.progress_total}
@@ -1862,6 +1863,21 @@ async def benchmark_extract_text(
         return {"text": ""}
     text = await asyncio.to_thread(_extract_pdf_text, content)
     return {"text": text}
+
+
+@router.post("/benchmark/{job_id}/cancel")
+async def benchmark_cancel(
+    job_id: str,
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+) -> dict[str, object]:
+    job = await store.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} nicht gefunden."
+        )
+    if job.status == "running":
+        job.cancelled = True
+    return {"job_id": job_id, "cancelled": job.cancelled}
 
 
 @router.get("/benchmark/{job_id}")

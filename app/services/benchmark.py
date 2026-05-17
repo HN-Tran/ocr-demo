@@ -33,7 +33,7 @@ from app.services.mlflow_sink import MlflowSink, disabled_sink
 logger = logging.getLogger("ocr-demo.benchmark")
 
 RowStatus = Literal["pending", "running", "done", "error"]
-JobStatus = Literal["queued", "running", "done", "failed"]
+JobStatus = Literal["queued", "running", "done", "failed", "cancelled"]
 
 
 @dataclass
@@ -69,6 +69,7 @@ class BenchmarkJob:
     error: str | None = None
     mlflow_run_id: str | None = None
     mlflow_run_url: str | None = None
+    cancelled: bool = False
 
 
 def _serialize_job(job: BenchmarkJob) -> dict[str, Any]:
@@ -196,6 +197,12 @@ def _avg_conf(words: list[dict[str, Any]]) -> float | None:
 # ---------------------------------------------------------------------------
 
 
+async def _cleanup_after(store: BenchmarkJobStore, job_id: str, delay_s: float) -> None:
+    if delay_s > 0:
+        await asyncio.sleep(delay_s)
+    await store.drop(job_id)
+
+
 async def run_benchmark_job(
     *,
     job: BenchmarkJob,
@@ -204,6 +211,7 @@ async def run_benchmark_job(
     runners: list[_LocalModelRunner | _EngineRunner],
     store: BenchmarkJobStore,
     mlflow_sink: MlflowSink | None = None,
+    job_ttl_s: float = 3600.0,
 ) -> None:
     """Sequentielle Ausführung aller (Datei, Runner)-Paare.
 
@@ -232,8 +240,12 @@ async def run_benchmark_job(
             )
 
             for f_idx, (name, content, ctype) in enumerate(files):
+                if job.cancelled:
+                    break
                 ref = references[f_idx] if f_idx < len(references) else ""
                 for runner in runners:
+                    if job.cancelled:
+                        break
                     row = BenchmarkRow(
                         file_index=f_idx,
                         file_name=name,
@@ -317,15 +329,16 @@ async def run_benchmark_job(
                     }
                 )
 
-        job.status = "done"
+        job.status = "cancelled" if job.cancelled else "done"
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.error = f"{type(exc).__name__}: {exc}"
         logger.exception("Benchmark-Job %s abgebrochen", job.id)
     finally:
-        # Force a final state update via the lock (fire-and-forget for idempotency).
         async with store._lock:  # noqa: SLF001 — same-module access
             store._jobs[job.id] = job
+        ttl = 0.0 if job.cancelled else job_ttl_s
+        asyncio.create_task(_cleanup_after(store, job.id, ttl))
 
 
 def _label_slug(label: str) -> str:

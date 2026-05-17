@@ -60,6 +60,7 @@ class Settings:
     mlflow_experiment_name: str
     benchmark_max_files: int
     benchmark_max_runners: int
+    benchmark_job_ttl_s: float
     examples: tuple[tuple[str, str], ...]
     ocr_word_detector: str
     default_token_limit: int
@@ -121,6 +122,7 @@ def get_settings() -> Settings:
         mlflow_experiment_name=os.getenv("MLFLOW_EXPERIMENT_NAME", "ocr-demo").strip(),
         benchmark_max_files=max(1, _env_int("BENCHMARK_MAX_FILES", 50)),
         benchmark_max_runners=max(1, _env_int("BENCHMARK_MAX_RUNNERS", 5)),
+        benchmark_job_ttl_s=max(0.0, _env_float("BENCHMARK_JOB_TTL_S", 3600.0)),
         examples=tuple(examples),
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "doctr").strip().lower(),
         default_token_limit=default_token_limit,

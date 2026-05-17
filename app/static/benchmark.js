@@ -12,6 +12,7 @@ const csvLinkEl = document.getElementById("bench-csv-link");
 const mlflowLinkEl = document.getElementById("bench-mlflow-link");
 const aggEl = document.getElementById("bench-aggregate");
 const tableBodyEl = document.getElementById("bench-table-body");
+const stopBtn = document.getElementById("bench-stop");
 
 let pickedFiles = [];
 const zipContents = new Map(); // filename → [{name, has_reference}]
@@ -190,6 +191,17 @@ cancelBtn?.addEventListener("click", () => {
     pollTimer = 0;
   }
   activeJobId = null;
+  stopBtn?.classList.add("hidden");
+});
+
+stopBtn?.addEventListener("click", async () => {
+  if (!activeJobId) return;
+  stopBtn.disabled = true;
+  try {
+    await fetch(`${appBasePath}/api/benchmark/${activeJobId}/cancel`, { method: "POST" });
+  } finally {
+    stopBtn.disabled = false;
+  }
 });
 
 startBtn.addEventListener("click", async () => {
@@ -245,6 +257,7 @@ startBtn.addEventListener("click", async () => {
     activeJobId = data.job_id;
     csvLinkEl.href = `${appBasePath}/api/benchmark/${activeJobId}/csv`;
     resultsEl.classList.remove("hidden");
+    stopBtn?.classList.remove("hidden");
     aggEl.innerHTML = "";
     tableBodyEl.innerHTML = "";
     startPolling();
@@ -268,9 +281,10 @@ async function pollOnce() {
     if (!resp.ok) return;
     const job = await resp.json();
     renderJob(job);
-    if (job.status === "done" || job.status === "failed") {
+    if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
       window.clearInterval(pollTimer);
       pollTimer = 0;
+      stopBtn?.classList.add("hidden");
     }
   } catch {
     /* network blip — try again next tick */
