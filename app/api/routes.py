@@ -2334,9 +2334,10 @@ async def warm_example(
 
     compare_response: dict[str, object] | None = None
     if azure_endpoint:
-        engine = build_compare_engine(
-            "azure",
-            {"azure_endpoint": azure_endpoint, "azure_key": azure_key},
+        engine = AzureEngine(
+            endpoint="",
+            key=azure_key or "",
+            full_analyze_url=azure_endpoint,
             verify_ssl=verify_ssl,
         )
         compare_response = await _execute_compare(
@@ -2652,22 +2653,31 @@ async def compare_with_engine(
         "plain_text_auth_header": plain_text_auth_header or "",
         "plain_text_auth_value": plain_text_auth_value or "",
     }
-    # Server-seitiger Preset-Key für Azure: wenn die URL zum konfigurierten
-    # Preset-Endpoint passt und der Aufrufer keinen Key mitschickt, ergänzen
-    # wir den Key serverseitig (sodass das Frontend ihn nicht halten muss).
-    if (
-        engine.strip().lower() == "azure"
-        and not engine_config["azure_key"]
-        and settings.azure_preset_endpoint
-        and engine_config["azure_endpoint"].strip() == settings.azure_preset_endpoint
-        and settings.azure_preset_key
-    ):
-        engine_config["azure_key"] = settings.azure_preset_key
+    # When the submitted azure_endpoint matches a configured preset URL, use it
+    # as full_analyze_url (bypassing path construction) and inject the key.
+    # The key is optional — unauthenticated endpoints work fine with an empty key.
+    engine_instance: Engine | None = None
+    if engine.strip().lower() == "azure":
+        submitted = engine_config["azure_endpoint"].strip()
+        preset_pairs = [
+            (settings.azure_preset_endpoint, settings.azure_preset_key),
+            (settings.azure_preset_layout_endpoint, settings.azure_preset_key),
+        ]
+        for preset_url, preset_key in preset_pairs:
+            if preset_url and submitted == preset_url:
+                engine_instance = AzureEngine(
+                    endpoint="",
+                    key=preset_key or "",
+                    full_analyze_url=preset_url,
+                    verify_ssl=settings.verify_ssl,
+                )
+                break
 
     try:
-        engine_instance = build_compare_engine(
-            engine, engine_config, verify_ssl=settings.verify_ssl, pipeline=pipeline
-        )
+        if engine_instance is None:
+            engine_instance = build_compare_engine(
+                engine, engine_config, verify_ssl=settings.verify_ssl, pipeline=pipeline
+            )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

@@ -208,8 +208,10 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_expert_compare_include_detector_only": (
                     settings.ocr_expert_compare_include_detector_only
                 ),
-                "azure_preset_label": settings.azure_preset_label,
+                "azure_preset_label": f"{settings.azure_preset_label} (Plain)" if settings.azure_preset_label else "",
                 "azure_preset_endpoint": settings.azure_preset_endpoint,
+                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
+                "azure_preset_layout_endpoint": settings.azure_preset_layout_endpoint,
                 "compare_engines": compare_available_engines(),
                 "examples": [
                     {"slot": idx + 1, "label": label}

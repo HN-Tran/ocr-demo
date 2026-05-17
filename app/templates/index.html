@@ -573,6 +573,14 @@
                     data-endpoint="{{ azure_preset_endpoint }}"
                   >{{ azure_preset_label }}</button>
                   {% endif %}
+                  {% if azure_preset_layout_label and azure_preset_layout_endpoint %}
+                  <button
+                    type="button"
+                    class="action-btn secondary-action"
+                    id="compare-preset-layout-btn"
+                    data-endpoint="{{ azure_preset_layout_endpoint }}"
+                  >{{ azure_preset_layout_label }}</button>
+                  {% endif %}
                 </div>
               </form>
 

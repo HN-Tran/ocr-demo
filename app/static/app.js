@@ -74,6 +74,7 @@ const compareFormEl = document.getElementById("compare-form");
 const azureEndpointEl = document.getElementById("azure-endpoint");
 const azureKeyEl = document.getElementById("azure-key");
 const comparePresetBtn = document.getElementById("compare-preset-btn");
+const comparePresetLayoutBtn = document.getElementById("compare-preset-layout-btn");
 const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
 const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
@@ -2902,6 +2903,19 @@ compareFormEl.addEventListener("submit", async (event) => {
 if (comparePresetBtn) {
   comparePresetBtn.addEventListener("click", () => {
     const endpoint = comparePresetBtn.dataset.endpoint || "";
+    if (!endpoint) return;
+    if (compareEngineEl) {
+      compareEngineEl.value = "azure";
+      _showEngineFields("azure");
+    }
+    azureEndpointEl.value = endpoint;
+    compareFormEl.requestSubmit();
+  });
+}
+
+if (comparePresetLayoutBtn) {
+  comparePresetLayoutBtn.addEventListener("click", () => {
+    const endpoint = comparePresetLayoutBtn.dataset.endpoint || "";
     if (!endpoint) return;
     if (compareEngineEl) {
       compareEngineEl.value = "azure";
