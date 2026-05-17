@@ -52,6 +52,8 @@ class BenchmarkRow:
     avg_confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    text: str = ""
+    reference: str = ""
 
 
 @dataclass
@@ -244,12 +246,14 @@ async def run_benchmark_job(
                     text = ""
                     try:
                         text, _words, warnings, avg_conf = await runner.analyze(content, ctype)
+                        row.text = text
                         row.text_chars = len(text)
                         row.text_tokens = len(_tokenize(text))
                         row.latency_ms = int((time.perf_counter() - started) * 1000)
                         row.warnings = warnings
                         row.avg_confidence = avg_conf
                         if ref.strip():
+                            row.reference = ref
                             ref_block = reference_only(ref, text)["ours"]
                             row.cer = float(ref_block["cer"])
                             row.wer = float(ref_block["wer"])

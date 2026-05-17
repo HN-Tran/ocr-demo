@@ -16,6 +16,7 @@ const tableBodyEl = document.getElementById("bench-table-body");
 let pickedFiles = [];
 let activeJobId = null;
 let pollTimer = 0;
+const expandedRows = new Set();
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({
@@ -234,7 +235,32 @@ async function pollOnce() {
   }
 }
 
+function renderWordDiff(ref, hyp) {
+  const rW = ref.trim().split(/\s+/).filter(Boolean);
+  const hW = hyp.trim().split(/\s+/).filter(Boolean);
+  const m = rW.length, n = hW.length;
+  const dp = Array.from({length: m + 1}, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = rW[i-1] === hW[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  const ops = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && rW[i-1] === hW[j-1]) { ops.unshift({t: "eq", w: hW[j-1]}); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift({t: "ins", w: hW[j-1]}); j--; }
+    else { ops.unshift({t: "del", w: rW[i-1]}); i--; }
+  }
+  return ops.map(({t, w}) => {
+    if (t === "eq") return `<span>${escapeHtml(w)}</span>`;
+    if (t === "ins") return `<span class="bench-diff-ins">${escapeHtml(w)}</span>`;
+    return `<span class="bench-diff-del">${escapeHtml(w)}</span>`;
+  }).join(" ");
+}
+
+let _lastJob = null;
+
 function renderJob(job) {
+  _lastJob = job;
   const { progress, rows, aggregate, status, error, mlflow } = job;
   statusEl.textContent =
     error
@@ -251,29 +277,62 @@ function renderJob(job) {
   }
 
   // Table
-  tableBodyEl.innerHTML = (rows || [])
-    .map((row) => {
-      const warnings = (row.warnings || []).join(" | ");
-      const cls = row.status === "running"
-        ? "bench-status-running"
-        : row.status === "error"
-        ? "bench-status-error"
-        : "";
-      return `
-        <tr>
-          <td>${escapeHtml(row.file_name)}</td>
-          <td>${escapeHtml(row.runner_label)}</td>
-          <td class="${cls}">${escapeHtml(row.status)}</td>
-          <td>${row.text_tokens || 0}</td>
-          <td>${row.text_chars || 0}</td>
-          <td>${fmtMs(row.latency_ms)}</td>
-          <td>${fmt(row.cer)}</td>
-          <td>${fmt(row.wer)}</td>
-          <td>${fmt(row.token_f1)}</td>
-          <td class="bench-warnings">${escapeHtml(row.error || warnings)}</td>
-        </tr>`;
-    })
-    .join("");
+  const rowHtml = (rows || []).flatMap((row, idx) => {
+    const warnings = (row.warnings || []).join(" | ");
+    const cls = row.status === "running"
+      ? "bench-status-running"
+      : row.status === "error"
+      ? "bench-status-error"
+      : "";
+    const hasDetail = row.status === "done" && row.text;
+    const expanded = expandedRows.has(idx);
+    const toggleBtn = hasDetail
+      ? `<button class="bench-expand-btn" data-row-idx="${idx}" title="Text anzeigen">${expanded ? "▲" : "▼"}</button>`
+      : "";
+    const mainRow = `
+      <tr>
+        <td>${escapeHtml(row.file_name)}</td>
+        <td>${escapeHtml(row.runner_label)}</td>
+        <td class="${cls}">${escapeHtml(row.status)}</td>
+        <td>${row.text_tokens || 0}</td>
+        <td>${row.text_chars || 0}</td>
+        <td>${fmtMs(row.latency_ms)}</td>
+        <td>${fmt(row.cer)}</td>
+        <td>${fmt(row.wer)}</td>
+        <td>${fmt(row.token_f1)}</td>
+        <td class="bench-warnings">${escapeHtml(row.error || warnings)}</td>
+        <td>${toggleBtn}</td>
+      </tr>`;
+    if (!hasDetail || !expanded) return [mainRow];
+    const diffHtml = row.reference
+      ? `<div class="bench-detail-section">
+           <div class="bench-detail-label">Diff (Referenz ↔ Erkannt)</div>
+           <div class="bench-diff-words">${renderWordDiff(row.reference, row.text)}</div>
+         </div>`
+      : "";
+    const detailRow = `
+      <tr class="bench-detail-row">
+        <td colspan="11">
+          <div class="bench-detail">
+            <div class="bench-detail-section">
+              <div class="bench-detail-label">Erkannter Text</div>
+              <pre class="bench-detail-pre">${escapeHtml(row.text)}</pre>
+            </div>
+            ${diffHtml}
+          </div>
+        </td>
+      </tr>`;
+    return [mainRow, detailRow];
+  }).join("");
+  tableBodyEl.innerHTML = rowHtml;
+  tableBodyEl.querySelectorAll(".bench-expand-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.rowIdx, 10);
+      if (expandedRows.has(idx)) expandedRows.delete(idx);
+      else expandedRows.add(idx);
+      if (_lastJob) renderJob(_lastJob);
+    });
+  });
 
   // Aggregate cards
   const per = aggregate?.per_runner || {};

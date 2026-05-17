@@ -1895,6 +1895,8 @@ async def benchmark_csv(
         "avg_confidence",
         "warnings",
         "error",
+        "text",
+        "reference",
     ]
 
     def _csv_cell(v: object) -> str:
