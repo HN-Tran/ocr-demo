@@ -14,26 +14,26 @@ const aggEl = document.getElementById("bench-aggregate");
 const tableBodyEl = document.getElementById("bench-table-body");
 
 let pickedFiles = [];
+const zipContents = new Map(); // filename → [{name, has_reference}]
 let activeJobId = null;
 let pollTimer = 0;
 const expandedRows = new Set();
 
-const themeToggleBtn = document.getElementById("bench-theme-toggle");
-themeToggleBtn?.addEventListener("click", () => {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  if (isDark) {
-    document.documentElement.removeAttribute("data-theme");
-    localStorage.setItem("ocr-demo-theme", "light");
-    themeToggleBtn.textContent = "☾";
-  } else {
-    document.documentElement.setAttribute("data-theme", "dark");
-    localStorage.setItem("ocr-demo-theme", "dark");
-    themeToggleBtn.textContent = "☀";
-  }
-});
-if (document.documentElement.getAttribute("data-theme") === "dark" && themeToggleBtn) {
-  themeToggleBtn.textContent = "☀";
+const themeLightBtn = document.getElementById("theme-light-btn");
+const themeDarkBtn = document.getElementById("theme-dark-btn");
+
+function applyTheme(theme) {
+  const isDark = theme === "dark";
+  if (isDark) document.documentElement.setAttribute("data-theme", "dark");
+  else document.documentElement.removeAttribute("data-theme");
+  themeLightBtn?.setAttribute("aria-pressed", String(!isDark));
+  themeDarkBtn?.setAttribute("aria-pressed", String(isDark));
 }
+
+applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+
+themeLightBtn?.addEventListener("click", () => { localStorage.setItem("ocr-demo-theme", "light"); applyTheme("light"); });
+themeDarkBtn?.addEventListener("click", () => { localStorage.setItem("ocr-demo-theme", "dark"); applyTheme("dark"); });
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({
@@ -93,10 +93,23 @@ function renderFileList() {
   const rows = pickedFiles
     .map((f, i) => {
       if (isZipFile(f)) {
+        const entries = zipContents.get(f.name);
+        let treeHtml;
+        if (!entries) {
+          treeHtml = `<span class="bench-zip-note">Wird analysiert…</span>`;
+        } else if (entries.length === 0) {
+          treeHtml = `<span class="bench-zip-note">Keine unterstützten Dateien gefunden</span>`;
+        } else {
+          treeHtml = `<ul class="bench-zip-tree">${entries.map((e, ei) => {
+            const isLast = ei === entries.length - 1;
+            const icon = e.has_reference ? `<span class="bench-zip-ref-icon" title="Referenztext vorhanden">✓</span>` : "";
+            return `<li class="${isLast ? "last" : ""}">${escapeHtml(e.name)}${icon}</li>`;
+          }).join("")}</ul>`;
+        }
         return `
         <div class="bench-file-row bench-file-row-zip" data-file-index="${i}">
           <div class="bench-file-name">${escapeHtml(f.name)} <span class="bench-zip-badge">ZIP</span></div>
-          <div class="bench-zip-note">Enthaltene Dateien werden entpackt · Referenztexte aus gepaarten .txt-Dateien</div>
+          <div>${treeHtml}</div>
           <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
         </div>`;
       }
@@ -112,7 +125,8 @@ function renderFileList() {
   fileListEl.querySelectorAll(".bench-file-delete").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.deleteIndex, 10);
-      pickedFiles.splice(idx, 1);
+      const removed = pickedFiles.splice(idx, 1)[0];
+      if (removed) zipContents.delete(removed.name);
       renderFileList();
     });
   });
@@ -128,7 +142,18 @@ async function addFiles(files) {
 
   for (let i = startIdx; i < pickedFiles.length; i++) {
     const f = pickedFiles[i];
-    if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+    if (isZipFile(f)) {
+      try {
+        const fd = new FormData();
+        fd.append("file", f);
+        const resp = await fetch(`${appBasePath}/api/benchmark/list-zip`, { method: "POST", body: fd });
+        if (resp.ok) {
+          const { files } = await resp.json();
+          zipContents.set(f.name, files || []);
+          renderFileList();
+        }
+      } catch (_) { zipContents.set(f.name, []); renderFileList(); }
+    } else if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
       try {
         const fd = new FormData();
         fd.append("file", f);

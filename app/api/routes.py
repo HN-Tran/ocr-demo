@@ -1828,6 +1828,25 @@ async def benchmark_create(
     return {"job_id": job.id, "status": job.status, "progress_total": job.progress_total}
 
 
+@router.post("/benchmark/list-zip")
+async def benchmark_list_zip(
+    file: UploadFile = File(...),
+) -> dict[str, object]:
+    content = await file.read()
+    if not content or not _is_zip(content, file.content_type):
+        return {"files": []}
+    try:
+        entries = await asyncio.to_thread(_expand_zip, content)
+    except Exception:
+        return {"files": []}
+    return {
+        "files": [
+            {"name": name, "has_reference": bool(ref)}
+            for name, _bytes, _ctype, ref in entries
+        ]
+    }
+
+
 @router.post("/benchmark/extract-text")
 async def benchmark_extract_text(
     file: UploadFile = File(...),

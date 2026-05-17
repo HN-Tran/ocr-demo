@@ -136,6 +136,42 @@
   align-self: center;
 }
 
+.bench-zip-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0.15rem 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.bench-zip-tree li {
+  font-size: 0.78rem;
+  color: var(--ink);
+  padding-left: 1rem;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.bench-zip-tree li::before {
+  content: "├─";
+  position: absolute;
+  left: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.bench-zip-tree li.last::before {
+  content: "└─";
+}
+
+.bench-zip-ref-icon {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .bench-file-row .bench-file-name {
   font-weight: 600;
   color: var(--ink);
