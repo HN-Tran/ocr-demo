@@ -14,6 +14,7 @@ import pypdfium2 as pdfium
 from PIL import Image, ImageOps
 
 from app.schemas import SCHEMA_REGISTRY
+from app.services.deskew import deskew_image
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.services.structured import parse_structured_output
 
@@ -221,6 +222,8 @@ class OCRPipeline:
         default_token_limit: int,
         max_image_dim: int,
         binarized_min_dim: int = 1800,
+        deskew_enabled: bool = False,
+        deskew_min_angle_deg: float = 0.5,
     ) -> None:
         if default_token_limit < 1:
             raise ValueError("default_token_limit muss eine positive ganze Zahl sein")
@@ -231,6 +234,8 @@ class OCRPipeline:
         self.default_token_limit = default_token_limit
         self.max_image_dim = max_image_dim
         self.binarized_min_dim = binarized_min_dim
+        self.deskew_enabled = deskew_enabled
+        self.deskew_min_angle_deg = deskew_min_angle_deg
         prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
         self.plain_prompt_template = (prompts_dir / "plain_ocr.txt").read_text(encoding="utf-8")
         self.structured_prompt_template = (prompts_dir / "structured_ocr.txt").read_text(
@@ -238,10 +243,12 @@ class OCRPipeline:
         )
 
     @staticmethod
-    def _build_page_info(*, page_number: int, width: int, height: int) -> dict[str, object]:
+    def _build_page_info(
+        *, page_number: int, width: int, height: int, angle: float = 0.0
+    ) -> dict[str, object]:
         return {
             "page_number": page_number,
-            "angle": 0.0,
+            "angle": angle,
             "width": width,
             "height": height,
             "unit": "pixel",
@@ -259,6 +266,16 @@ class OCRPipeline:
             rotated: Image.Image = ImageOps.exif_transpose(opened)
             original_mode = rotated.mode
             image = _flatten_to_rgb(rotated)
+
+            detected_angle = 0.0
+            if self.deskew_enabled:
+                image, detected_angle = deskew_image(
+                    image, min_angle_deg=self.deskew_min_angle_deg
+                )
+                if detected_angle != 0.0:
+                    warnings.append(
+                        f"Deskew: {detected_angle:.1f}° CCW Korrektur angewendet"
+                    )
 
             # Schritt 1: bitonale/Grauwert-Eingaben hochskalieren, BEVOR wir
             # an die max_image_dim-Grenze kommen — sonst geht der Vorteil
@@ -288,6 +305,7 @@ class OCRPipeline:
                     page_number=page_number,
                     width=image.width,
                     height=image.height,
+                    angle=detected_angle,
                 ),
             )
 

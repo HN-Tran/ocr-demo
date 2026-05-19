@@ -69,6 +69,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
         binarized_min_dim=settings.ocr_binarized_min_dim,
+        deskew_enabled=settings.deskew_enabled,
+        deskew_min_angle_deg=settings.deskew_min_angle_deg,
     )
     document_pipeline = DocumentPipeline(
         direct_pipeline=ocr_pipeline,

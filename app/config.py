@@ -68,6 +68,8 @@ class Settings:
     max_upload_bytes: int
     max_image_dim: int
     verify_ssl: bool
+    deskew_enabled: bool
+    deskew_min_angle_deg: float
     host: str
     port: int
 
@@ -127,6 +129,8 @@ def get_settings() -> Settings:
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "doctr").strip().lower(),
         default_token_limit=default_token_limit,
         verify_ssl=_env_bool("VERIFY_SSL", False),
+        deskew_enabled=_env_bool("DESKEW_ENABLED", False),
+        deskew_min_angle_deg=max(0.0, _env_float("DESKEW_MIN_ANGLE_DEG", 0.5)),
         request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 120.0),
         max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 8 * 1024 * 1024),
         max_image_dim=_env_int("MAX_IMAGE_DIM", 3600),

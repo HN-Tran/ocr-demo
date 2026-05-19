@@ -19,6 +19,7 @@ from typing import Any, cast
 from PIL import Image
 from rapidfuzz import fuzz
 
+from app.services.deskew import detect_cardinal_rotation, deskew_image
 from app.services.layout_detector import HFLayoutDetector, LayoutDetectorConfig
 from app.services.ocr_pipeline import (
     PLAIN_TASK_OCR_TEXT,
@@ -447,6 +448,9 @@ class DocumentPipeline:
         self.text_anchor_threshold = text_anchor_threshold
         self.word_detector: WordDetector | None = word_detector
         self.layout_max_dim = max(256, int(layout_max_dim))
+        # Inherited from direct_pipeline so both pipelines share one setting.
+        self.deskew_enabled = direct_pipeline.deskew_enabled
+        self.deskew_min_angle_deg = direct_pipeline.deskew_min_angle_deg
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
         self._word_detector_cache: dict[str, WordDetector | None] = {}
@@ -526,9 +530,16 @@ class DocumentPipeline:
         region: dict[str, Any],
         *,
         model: str,
+        precomputed_bytes: bytes | None = None,
     ) -> str:
-        """Crop a region and OCR it with the plain prompt."""
-        crop_bytes = self._crop_region(image, region.get("bbox_2d", [0, 0, 0, 0]))
+        """Crop a region and OCR it with the plain prompt.
+
+        Pass ``precomputed_bytes`` to supply an already-corrected crop (e.g.
+        after cardinal rotation); otherwise the crop is taken from ``image``.
+        """
+        crop_bytes = precomputed_bytes or self._crop_region(
+            image, region.get("bbox_2d", [0, 0, 0, 0])
+        )
         if not crop_bytes:
             return ""
         raw = await self.ollama_client.run_ocr(
@@ -592,6 +603,7 @@ class DocumentPipeline:
         regions = _sort_reading_order(raw_regions)
 
         # 3. Build layout regions — crop OCR each, fuzzy-match against source text.
+        _CARDINAL_CONF_THRESHOLD = 0.70
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
@@ -603,6 +615,7 @@ class DocumentPipeline:
                 "bbox_2d": region.get("bbox_2d"),
                 "polygon": region.get("polygon"),
                 "confidence": region.get("score"),
+                "region_angle": 0,
             }
 
             if task_type == "skip":
@@ -610,8 +623,41 @@ class DocumentPipeline:
             elif not per_region_ocr:
                 layout_region["content"] = ""
             else:
+                # Per-region cardinal orientation detection (handles multi-doc scans).
+                precomputed_crop: bytes | None = None
+                if self.deskew_enabled:
+                    crop_img = self._crop_region_image(
+                        image, region.get("bbox_2d", [0, 0, 0, 0])
+                    )
+                    if crop_img is not None:
+                        try:
+                            rot, conf = await asyncio.to_thread(
+                                detect_cardinal_rotation, crop_img
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            warnings.append(
+                                f"Region {idx} Orientierungserkennung fehlgeschlagen: {exc}"
+                            )
+                            rot, conf = 0, 0.0
+                        if rot != 0 and conf >= _CARDINAL_CONF_THRESHOLD:
+                            _TRANSPOSE = {
+                                90: Image.Transpose.ROTATE_90,
+                                180: Image.Transpose.ROTATE_180,
+                                270: Image.Transpose.ROTATE_270,
+                            }
+                            corrected = crop_img.transpose(_TRANSPOSE[rot])
+                            buf = io.BytesIO()
+                            corrected.save(buf, format="PNG")
+                            precomputed_crop = buf.getvalue()
+                            layout_region["region_angle"] = rot
+                            warnings.append(
+                                f"Region {idx} ({label}): {rot}° CCW Rotation erkannt"
+                            )
+
                 try:
-                    candidate = await self._ocr_region(image, region, model=model)
+                    candidate = await self._ocr_region(
+                        image, region, model=model, precomputed_bytes=precomputed_crop
+                    )
                 except OllamaError as exc:
                     warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
                     candidate = ""
@@ -807,6 +853,28 @@ class DocumentPipeline:
         page_infos: list[dict[str, object]] = []
         for page_idx, (page_image, page_bytes) in enumerate(pages):
             page_number = page_idx + 1
+
+            # Page-level deskew: correct cardinal rotation and fine skew before
+            # layout detection so regions are detected on a straight image.
+            page_angle = 0.0
+            if self.deskew_enabled:
+                try:
+                    page_image, page_angle = await asyncio.to_thread(
+                        deskew_image,
+                        page_image,
+                        min_angle_deg=self.deskew_min_angle_deg,
+                    )
+                    if page_angle != 0.0:
+                        buf = io.BytesIO()
+                        page_image.save(buf, format="PNG")
+                        page_bytes = buf.getvalue()
+                        deskew_msg = f"Deskew: {page_angle:.1f}° CCW Korrektur angewendet"
+                        warnings.append(
+                            f"Seite {page_number}: {deskew_msg}" if len(pages) > 1 else deskew_msg
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Deskew fehlgeschlagen: {exc}")
+
             page_layout, page_text, page_warnings = await self._process_page(
                 page_image,
                 page_bytes,
@@ -841,7 +909,7 @@ class DocumentPipeline:
             page_infos.append(
                 {
                     "page_number": page_number,
-                    "angle": 0.0,
+                    "angle": page_angle,
                     "width": page_image.width,
                     "height": page_image.height,
                     "unit": "pixel",
