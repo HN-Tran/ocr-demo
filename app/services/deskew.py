@@ -23,22 +23,46 @@ def _proj_variance(gray: np.ndarray) -> float:
     return float(np.var(binary.sum(axis=1).astype(np.float64)))
 
 
-def _gradient_asymmetry(gray: np.ndarray) -> float:
-    """Return a score that is positive when the image is correctly oriented (0°).
+def _boundary_asymmetry(gray: np.ndarray) -> float:
+    """Return a score > 0 when the image is correctly oriented (0°).
 
-    In upright Latin text the transition from whitespace INTO text (going
-    downward) is sharper than the transition OUT of text, because cap-height
-    starts cleanly while descenders trail off.  The score compares the mean
-    squared energy of rising vs falling gradients of the horizontal projection.
+    Measures whether text band ENTRIES (top edge) are sharper than EXITS
+    (bottom edge) using only cross-zero transitions in the projection profile.
+    Within-band fluctuations are excluded to avoid the signal being swamped by
+    internal variation.
+
+    For upright Latin text the entry (cap-height) is at full density from the
+    first row, while the exit tapers through descenders — giving a sharper entry
+    transition. Score = mean(entry²) − mean(exit²).
     """
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     proj = binary.sum(axis=1).astype(np.float64)
-    grad = np.diff(proj)
-    pos = grad[grad > 0]
-    neg = grad[grad < 0]
-    if len(pos) == 0 or len(neg) == 0:
+
+    threshold = proj.max() * 0.05  # ignore sub-threshold noise
+    if threshold == 0:
         return 0.0
-    return float(np.mean(pos ** 2) - np.mean(neg ** 2))
+
+    entry_sq: list[float] = []
+    exit_sq: list[float] = []
+    in_band = False
+    prev_val = 0.0
+
+    for i, val in enumerate(proj):
+        if not in_band and val > threshold:
+            entry_sq.append(val ** 2)
+            in_band = True
+        elif in_band and val <= threshold:
+            exit_sq.append(prev_val ** 2)
+            in_band = False
+        prev_val = val
+
+    # Close any open band at the image edge.
+    if in_band and prev_val > threshold:
+        exit_sq.append(prev_val ** 2)
+
+    if not entry_sq or not exit_sq:
+        return 0.0
+    return float(np.mean(entry_sq) - np.mean(exit_sq))
 
 
 # ---------------------------------------------------------------------------
@@ -71,9 +95,9 @@ def detect_cardinal_rotation(img: Image.Image) -> tuple[int, float]:
     score_90_270 = max(variances[1], variances[3])  # rotated 90° either way
 
     if score_0_180 >= score_90_270:
-        # Text is roughly horizontal → distinguish 0° from 180° via gradient asymmetry.
-        sym_0 = _gradient_asymmetry(candidates[0])
-        sym_180 = _gradient_asymmetry(candidates[2])
+        # Text is roughly horizontal → distinguish 0° from 180° via boundary asymmetry.
+        sym_0 = _boundary_asymmetry(candidates[0])
+        sym_180 = _boundary_asymmetry(candidates[2])
         if sym_0 >= sym_180:
             winner_k = 0
             margin = abs(sym_0 - sym_180)
@@ -120,7 +144,7 @@ def detect_fine_skew(img: Image.Image) -> float:
         if -45.0 < angle < 45.0:
             angles.append(angle)
 
-    if len(angles) < 5:
+    if len(angles) < 3:
         return 0.0
     return float(np.median(angles))
 
