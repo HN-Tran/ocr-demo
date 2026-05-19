@@ -42,7 +42,7 @@ def _extract_words_per_page(payload: dict[str, Any]) -> list[list[dict[str, Any]
 
 class SelfPeerEngine:
     name = "self_peer"
-    label = "OCR-Demo (anderer Endpunkt)"
+    label = "docread (anderer Endpunkt)"
 
     def __init__(
         self,

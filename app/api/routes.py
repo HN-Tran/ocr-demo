@@ -1142,7 +1142,7 @@ def _service_status_payload() -> dict[str, str]:
 def _usage_logs_payload() -> dict[str, object]:
     return {
         "apiType": "prebuilt-read",
-        "serviceName": "ocr-demo",
+        "serviceName": "docread",
         "type": "UsageLogs",
         "meters": [],
     }

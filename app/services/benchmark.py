@@ -30,7 +30,7 @@ from app.services.compare_engines import Engine
 from app.services.compare_metrics import _tokenize, reference_only
 from app.services.mlflow_sink import MlflowSink, disabled_sink
 
-logger = logging.getLogger("ocr-demo.benchmark")
+logger = logging.getLogger("docread.benchmark")
 
 RowStatus = Literal["pending", "running", "done", "error"]
 JobStatus = Literal["queued", "running", "done", "failed", "cancelled"]

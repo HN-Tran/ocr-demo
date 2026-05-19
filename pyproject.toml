@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ocr-demo"
+name = "docread"
 version = "0.2.4"
-description = "Minimales OCR-Demo mit Ollama und FastAPI"
+description = "Document OCR service with Ollama and FastAPI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

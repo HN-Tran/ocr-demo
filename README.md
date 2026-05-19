@@ -1,13 +1,13 @@
 [English](README.md) · [Deutsch](README_DE.md)
 
-# OCR-Demo (Ollama + FastAPI)
+# docread (Ollama + FastAPI)
 
-Minimal OCR demo with an Ollama vision model via a FastAPI backend, including a lightweight web interface and evaluation runner.
+Document OCR service using an Ollama vision model via a FastAPI backend, including a lightweight web interface and evaluation runner.
 
 ## Features
 
 - `POST /api/ocr` for plain-text or structured extraction
-- `POST /api/compare` for side-by-side comparison against external engines (Azure, OCR-Demo-Peer, Google Vision, Plain-Text-Endpoint) including a metrics panel and optional CER/WER against reference text
+- `POST /api/compare` for side-by-side comparison against external engines (Azure, docread-Peer, Google Vision, Plain-Text-Endpoint) including a metrics panel and optional CER/WER against reference text
 - `POST /api/benchmark` for batch benchmarks (N files × M runners) with live progress, CSV export, and optional MLflow tracking
 - `GET /api/models` to list available Ollama models
 - `GET /api/schemas` to display supported structured schemas
@@ -41,7 +41,7 @@ export OCR_EXPERT_LAYOUT_MODEL="PaddlePaddle/PP-DocLayoutV3_safetensors"
 export OCR_WORD_DETECTOR="none"         # none | paddleocr | doctr
 export OCR_EXPERT_OCR_API_HOST="localhost"
 export OCR_EXPERT_OCR_API_PORT="11434"
-export ANALYZE_STORE_DIR="/tmp/ocr-demo-analyze-results"
+export ANALYZE_STORE_DIR="/tmp/docread-analyze-results"
 export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"               # Upper limit for OCR image size
@@ -50,7 +50,7 @@ export OCR_BINARIZED_MIN_DIM="1800"       # 1-bit/L inputs are upscaled to at le
 export BENCHMARK_MAX_FILES="50"           # /api/benchmark hard cap
 export BENCHMARK_MAX_RUNNERS="5"          # /api/benchmark hard cap
 export MLFLOW_TRACKING_URI=""             # empty = no tracking; HTTP or file: URI
-export MLFLOW_EXPERIMENT_NAME="ocr-demo"
+export MLFLOW_EXPERIMENT_NAME="docread"
 ```
 
 Input preprocessing (in `app/services/ocr_pipeline.py`):
@@ -368,7 +368,7 @@ Configuration:
 
 ```bash
 export MLFLOW_TRACKING_URI=http://mlflow:5000   # or file:./mlruns
-export MLFLOW_EXPERIMENT_NAME=ocr-demo          # default: "ocr-demo"
+export MLFLOW_EXPERIMENT_NAME=docread          # default: "docread"
 ```
 
 In the benchmark UI, an "Open MLflow Run" link appears as soon as the job uses an HTTP/HTTPS tracking server; the `mlflow.run_url` field in the JSON response is useful for linking from custom tools. For `file:` URIs there is no useful browser URL, so the field remains `null`.

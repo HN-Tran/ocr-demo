@@ -23,7 +23,7 @@ from app.services.ollama_client import OllamaClient
 from app.services.warmed_example_store import WarmedExampleStore
 from app.services.word_detector import WordDetector, create_word_detector
 
-logger = logging.getLogger("ocr-demo")
+logger = logging.getLogger("docread")
 
 
 def _try_create_word_detector(name: str) -> WordDetector | None:
@@ -55,7 +55,7 @@ def _status_payload() -> dict[str, str]:
 def _create_ocr_app(*, settings: Settings) -> FastAPI:
     app = FastAPI(title=settings.app_name)
 
-    logger = logging.getLogger("ocr-demo")
+    logger = logging.getLogger("docread")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app.state.logger = logger
 

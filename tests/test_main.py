@@ -10,9 +10,9 @@ from app.main import _create_ocr_app, create_app
 
 def _settings(*, app_base_path: str = "") -> Settings:
     return Settings(
-        app_name="OCR-Demo",
+        app_name="docread",
         app_base_path=app_base_path,
-        analyze_store_dir="/tmp/ocr-demo-analyze-results-tests",
+        analyze_store_dir="/tmp/docread-analyze-results-tests",
         ollama_base_url="http://localhost:11434",
         ollama_model="glm-ocr:latest",
         ocr_backend="direct",

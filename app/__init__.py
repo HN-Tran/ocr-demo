@@ -1,1 +1,1 @@
-"""OCR demo package."""
+"""docread package."""

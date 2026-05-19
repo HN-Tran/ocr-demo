@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
-logger = logging.getLogger("ocr-demo.mlflow")
+logger = logging.getLogger("docread.mlflow")
 
 try:
     import mlflow as _mlflow

@@ -95,10 +95,10 @@ def get_settings() -> Settings:
             examples.append((label, path))
 
     return Settings(
-        app_name=os.getenv("APP_NAME", "OCR-Demo"),
+        app_name=os.getenv("APP_NAME", "docread"),
         app_base_path=os.getenv("APP_BASE_PATH", ""),
         analyze_store_dir=str(
-            Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/ocr-demo-analyze-results"))
+            Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/docread-analyze-results"))
         ),
         ollama_base_url=ollama_base_url,
         ollama_model=os.getenv("OLLAMA_MODEL", "glm-ocr:latest"),
@@ -121,7 +121,7 @@ def get_settings() -> Settings:
         azure_preset_layout_endpoint=os.getenv("AZURE_PRESET_LAYOUT_ENDPOINT", "").strip(),
         azure_preset_key=os.getenv("AZURE_PRESET_KEY", "").strip(),
         mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "").strip(),
-        mlflow_experiment_name=os.getenv("MLFLOW_EXPERIMENT_NAME", "ocr-demo").strip(),
+        mlflow_experiment_name=os.getenv("MLFLOW_EXPERIMENT_NAME", "docread").strip(),
         benchmark_max_files=max(1, _env_int("BENCHMARK_MAX_FILES", 50)),
         benchmark_max_runners=max(1, _env_int("BENCHMARK_MAX_RUNNERS", 5)),
         benchmark_job_ttl_s=max(0.0, _env_float("BENCHMARK_JOB_TTL_S", 3600.0)),
