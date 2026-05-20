@@ -2667,23 +2667,109 @@ function _showEngineFields(name) {
   }
 }
 
-const _modelsEndpoint = `${appBasePath}/api/models?vision_only=true`;
 const _peerModelsEndpoint = `${appBasePath}/api/peer-models`;
 const _defaultModelName = (document.body?.dataset.defaultModel || "").trim();
-let _localModelsCache = null;
+const _defaultInferenceProvider = (
+  document.body?.dataset.defaultInferenceProvider || "ollama"
+).trim();
+const inferenceProviderEl = document.getElementById("inference_provider");
+const modelEl = document.getElementById("model");
+const modelSuggestionsEl = document.getElementById("model-suggestions");
+const modelHintEl = document.getElementById("model-hint");
+const INFERENCE_PROVIDER_KEY = "docread-inference-provider";
+let _localModelsCacheByProvider = {};
+
+function _modelsEndpointForProvider(providerId) {
+  const provider = providerId || _defaultInferenceProvider;
+  return `${appBasePath}/api/models?vision_only=true&provider=${encodeURIComponent(provider)}`;
+}
 
 async function _fetchLocalModels() {
-  if (_localModelsCache) return _localModelsCache;
+  const providerId = inferenceProviderEl?.value?.trim() || _defaultInferenceProvider;
+  if (_localModelsCacheByProvider[providerId]) {
+    return _localModelsCacheByProvider[providerId];
+  }
   try {
-    const resp = await fetch(_modelsEndpoint);
+    const resp = await fetch(_modelsEndpointForProvider(providerId));
     if (!resp.ok) return [];
     const data = await resp.json();
-    _localModelsCache = Array.isArray(data?.models) ? data.models : [];
+    _localModelsCacheByProvider[providerId] = Array.isArray(data?.models) ? data.models : [];
   } catch {
-    _localModelsCache = [];
+    _localModelsCacheByProvider[providerId] = [];
   }
-  return _localModelsCache;
+  return _localModelsCacheByProvider[providerId];
 }
+
+function _populateInferenceProviderSelect(providers, defaultProvider) {
+  if (!inferenceProviderEl) return;
+  inferenceProviderEl.innerHTML = "";
+  for (const entry of providers) {
+    const id = typeof entry === "string" ? entry : entry?.id;
+    if (!id) continue;
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    inferenceProviderEl.appendChild(opt);
+  }
+  const saved = localStorage.getItem(INFERENCE_PROVIDER_KEY);
+  const ids = providers.map((entry) => (typeof entry === "string" ? entry : entry?.id));
+  inferenceProviderEl.value =
+    saved && ids.includes(saved) ? saved : defaultProvider || ids[0] || _defaultInferenceProvider;
+}
+
+function _populateModelSuggestions(models) {
+  if (!modelSuggestionsEl) return;
+  modelSuggestionsEl.innerHTML = "";
+  for (const name of models) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    modelSuggestionsEl.appendChild(opt);
+  }
+  if (modelHintEl) {
+    const providerId = inferenceProviderEl?.value?.trim() || _defaultInferenceProvider;
+    modelHintEl.textContent = models.length
+      ? `${models.length} Vision-Modelle (${providerId}). Qualifiziert: provider/model.`
+      : `Keine Modelle von ${providerId} geladen — Namen manuell eingeben.`;
+  }
+}
+
+async function _refreshModelSuggestions() {
+  const models = await _fetchLocalModels();
+  _populateModelSuggestions(models);
+  if (modelEl && !modelEl.value.trim() && _defaultModelName) {
+    modelEl.placeholder = _defaultModelName;
+  }
+}
+
+async function _initInferenceControls() {
+  if (!inferenceProviderEl) return;
+  try {
+    const resp = await fetch(`${appBasePath}/api/inference-providers`);
+    if (!resp.ok) throw new Error(String(resp.status));
+    const data = await resp.json();
+    const providers = Array.isArray(data?.providers) ? data.providers : [];
+    const defaultProvider = String(data?.default_provider || _defaultInferenceProvider);
+    if (providers.length === 0) {
+      _populateInferenceProviderSelect([defaultProvider], defaultProvider);
+    } else {
+      _populateInferenceProviderSelect(providers, defaultProvider);
+    }
+  } catch {
+    _populateInferenceProviderSelect([_defaultInferenceProvider], _defaultInferenceProvider);
+  }
+  await _refreshModelSuggestions();
+}
+
+inferenceProviderEl?.addEventListener("change", () => {
+  localStorage.setItem(INFERENCE_PROVIDER_KEY, inferenceProviderEl.value);
+  void _refreshModelSuggestions();
+  if (ourModelSelectEl || theirModelSelectEl) {
+    _localModelsCacheByProvider = {};
+    void _ensureLocalModelOptions();
+  }
+});
+
+void _initInferenceControls();
 
 function _populateModelSelect(selectEl, models, preferred) {
   if (!selectEl) return;

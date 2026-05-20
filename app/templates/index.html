@@ -6,7 +6,11 @@
     <title>OCR-Demo</title>
     <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
   </head>
-  <body data-base-path="{{ app_base_path }}" data-default-model="{{ default_model }}">
+  <body
+    data-base-path="{{ app_base_path }}"
+    data-default-model="{{ default_model }}"
+    data-default-inference-provider="{{ inference_provider }}"
+  >
     <main class="page">
       <section class="panel panel-input">
         <div class="heading-row">
@@ -334,8 +338,22 @@
             </label>
 
             <label>
+              Inference-Provider
+              <select id="inference_provider" name="inference_provider"></select>
+              <span class="hint">Vision-LLM-Backend für OCR (z. B. Ollama, vLLM).</span>
+            </label>
+
+            <label>
               Modell
-              <input id="model" name="model" placeholder="{{ default_model }}" />
+              <input
+                id="model"
+                name="model"
+                list="model-suggestions"
+                placeholder="{{ default_model }}"
+                autocomplete="off"
+              />
+              <datalist id="model-suggestions"></datalist>
+              <span id="model-hint" class="hint"></span>
             </label>
 
             <label>
