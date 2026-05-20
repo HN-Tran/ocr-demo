@@ -61,7 +61,8 @@ from app.services.compare_metrics import (
 )
 from app.services.mlflow_sink import MlflowSink
 from app.services.ocr_pipeline import OCRResult
-from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.inference import InferenceError, VisionLlmClient
+from app.services.inference.registry import VisionClientRegistry
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
 router = APIRouter(prefix="/api")
@@ -1114,8 +1115,13 @@ def get_ocr_backend_router(request: Request) -> OCRBackendRouter:
     return cast(OCRBackendRouter, request.app.state.ocr_backend_router)
 
 
-def get_ollama_client(request: Request) -> OllamaClient:
-    return cast(OllamaClient, request.app.state.ollama_client)
+def get_vision_registry(request: Request) -> VisionClientRegistry:
+    return cast(VisionClientRegistry, request.app.state.vision_registry)
+
+
+def get_vision_client(request: Request) -> VisionLlmClient:
+    registry = get_vision_registry(request)
+    return registry.get(registry.default_provider)
 
 
 def get_analyze_operation_store(request: Request) -> AnalyzeOperationStore:
@@ -1372,7 +1378,7 @@ async def _run_plain_ocr(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except OllamaError as exc:
+    except InferenceError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
@@ -1509,34 +1515,50 @@ def _compat_headers(
 
 
 @router.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
     settings = get_settings()
+    registry = get_vision_registry(request)
     return {
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ollama_base_url": settings.ollama_base_url,
-        "default_model": settings.ollama_model,
+        "inference_provider": settings.inference_provider,
+        "inference_providers": list(registry.provider_ids),
+        "inference_base_url": settings.inference_base_url,
+        "default_model": settings.inference_model,
         "default_backend": settings.ocr_backend,
         "default_token_limit": settings.default_token_limit,
+        "ollama_base_url": settings.ollama_base_url,
+    }
+
+
+@router.get("/inference-providers")
+async def inference_providers(
+    registry: VisionClientRegistry = Depends(get_vision_registry),
+) -> dict:
+    settings = get_settings()
+    return {
+        "default_provider": registry.default_provider,
+        "default_model": registry.default_model,
+        "providers": registry.describe(),
+        "extra_configured": sorted(settings.inference_extra_providers.keys()),
     }
 
 
 _VISION_CAP_CACHE: dict[str, bool] = {}
 
 
-async def _filter_vision_models(client: OllamaClient, names: list[str]) -> list[str]:
-    """Behalte nur Modelle, die von Ollama als ``vision``-fähig gemeldet werden.
+async def _filter_vision_models(client: VisionLlmClient, names: list[str]) -> list[str]:
+    """Behalte nur Modelle, die der Inference-Provider als vision-fähig meldet.
 
-    Cached pro Prozess, weil ``/api/show`` pro Modell ~100 ms kostet. Modelle,
-    deren Show-Aufruf fehlschlägt, werden konservativ rausgefiltert (lieber
-    weniger als falsche Auswahl).
+    Cached pro Prozess, weil Capability-Abfragen pro Modell kosten können. Modelle,
+    deren Abfrage fehlschlägt, werden konservativ rausgefiltert (lieber weniger
+    als falsche Auswahl).
     """
     pending = [n for n in names if n not in _VISION_CAP_CACHE]
     for name in pending:
         try:
-            caps = await client.model_capabilities(name)
-            _VISION_CAP_CACHE[name] = "vision" in caps
-        except OllamaError:
+            _VISION_CAP_CACHE[name] = await client.supports_vision(name)
+        except InferenceError:
             _VISION_CAP_CACHE[name] = False
     return [n for n in names if _VISION_CAP_CACHE.get(n, False)]
 
@@ -1544,17 +1566,26 @@ async def _filter_vision_models(client: OllamaClient, names: list[str]) -> list[
 @router.get("/models")
 async def models(
     vision_only: bool = False,
-    client: OllamaClient = Depends(get_ollama_client),
+    provider: str | None = None,
+    registry: VisionClientRegistry = Depends(get_vision_registry),
 ) -> dict:
+    provider_id = (provider or "").strip().lower() or registry.default_provider
+    try:
+        client = registry.get(provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     try:
         model_names = await client.list_models()
-    except OllamaError as exc:
+    except InferenceError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
     if vision_only:
         model_names = await _filter_vision_models(client, model_names)
-    return {"models": model_names}
+    return {
+        "models": model_names,
+        "inference_provider": client.provider_id,
+    }
 
 
 @router.get("/schemas")
@@ -1999,6 +2030,7 @@ async def ocr(
     expert_text_anchor_threshold: float | None = Form(None),
     expert_word_detector: str | None = Form(None),
     backend: str | None = Form(None),
+    inference_provider: str | None = Form(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
@@ -2007,6 +2039,9 @@ async def ocr(
     mode = cast(str, _resolve_text_param(mode, _query_param(request, "mode"), "plain"))
     schema_name = _resolve_text_param(schema_name, _query_param(request, "schema_name"), None)
     model = _resolve_text_param(model, _query_param(request, "model"), None)
+    resolved_inference_provider = _resolve_text_param(
+        inference_provider, _query_param(request, "inference_provider"), None
+    )
     task = _resolve_text_param(task, _query_param(request, "task"), None)
     custom_prompt = _resolve_text_param(custom_prompt, _query_param(request, "custom_prompt"), None)
     token_limit = _resolve_int_param(
@@ -2094,10 +2129,11 @@ async def ocr(
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            inference_provider=resolved_inference_provider,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except OllamaError as exc:
+    except InferenceError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
@@ -2145,6 +2181,7 @@ def _build_ocr_response(
         "layout_visualizations": getattr(result, "layout_visualizations", None),
         "page_images": getattr(result, "page_images", None),
         "model": getattr(result, "model", ""),
+        "inference_provider": getattr(result, "inference_provider", None),
         "mode": getattr(result, "mode", ""),
         "schema_name": getattr(result, "schema_name", None),
         "backend": selected_backend,

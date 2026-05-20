@@ -28,7 +28,8 @@ from app.services.ocr_pipeline import (
     encode_page_images,
     normalize_ocr_text_output,
 )
-from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.inference import InferenceError
+from app.services.inference.registry import VisionClientRegistry
 from app.services.table_structure_recognizer import TableStructureRecognizer
 from app.services.word_detector import WordDetector, create_word_detector
 
@@ -424,7 +425,7 @@ class DocumentPipeline:
         self,
         *,
         direct_pipeline: OCRPipeline,
-        ollama_client: OllamaClient,
+        vision_registry: VisionClientRegistry,
         default_model: str,
         enable_layout: bool,
         layout_model: str,
@@ -437,7 +438,8 @@ class DocumentPipeline:
         layout_max_dim: int = 1800,
     ) -> None:
         self.direct_pipeline = direct_pipeline
-        self.ollama_client = ollama_client
+        self.vision_registry = vision_registry
+        self._run_client = None
         self.default_model = default_model
         self.enable_layout = enable_layout
         self.layout_model = layout_model
@@ -448,6 +450,12 @@ class DocumentPipeline:
         self.text_anchor_threshold = text_anchor_threshold
         self.word_detector: WordDetector | None = word_detector
         self.layout_max_dim = max(256, int(layout_max_dim))
+
+    @property
+    def _vision_client(self):
+        if self._run_client is not None:
+            return self._run_client
+        return self.vision_registry.get(self.vision_registry.default_provider)
         # Inherited from direct_pipeline so both pipelines share one setting.
         self.deskew_enabled = direct_pipeline.deskew_enabled
         self.deskew_min_angle_deg = direct_pipeline.deskew_min_angle_deg
@@ -542,7 +550,7 @@ class DocumentPipeline:
         )
         if not crop_bytes:
             return ""
-        raw = await self.ollama_client.run_ocr(
+        raw = await self._vision_client.run_vision_chat(
             image_bytes=crop_bytes,
             prompt=self.direct_pipeline.plain_prompt_template,
             model=model,
@@ -572,13 +580,13 @@ class DocumentPipeline:
 
         # 1. Full-page OCR — one call, no cropping, no clipping.
         try:
-            page_text = await self.ollama_client.run_ocr(
+            page_text = await self._vision_client.run_vision_chat(
                 image_bytes=image_bytes,
                 prompt=self.direct_pipeline.plain_prompt_template,
                 model=model,
             )
             page_text = normalize_ocr_text_output(page_text)
-        except OllamaError as exc:
+        except InferenceError as exc:
             warnings.append(f"Seiten-OCR fehlgeschlagen: {exc}")
             page_text = ""
 
@@ -658,7 +666,7 @@ class DocumentPipeline:
                     candidate = await self._ocr_region(
                         image, region, model=model, precomputed_bytes=precomputed_crop
                     )
-                except OllamaError as exc:
+                except InferenceError as exc:
                     warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
                     candidate = ""
                 if not candidate:
@@ -725,8 +733,61 @@ class DocumentPipeline:
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
         expert_assemble_from_regions: bool | None = None,
+        inference_provider: str | None = None,
     ) -> OCRResult:
-        selected_model = (model or "").strip() or self.default_model
+        resolved = self.vision_registry.resolve(
+            inference_provider=inference_provider,
+            model=model,
+        )
+        self._run_client = resolved.client
+        try:
+            return await self._run_with_client(
+                selected_model=resolved.model_id,
+                inference_provider=resolved.provider_id,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
+                gif_max_frames=gif_max_frames,
+                expert_enable_layout=expert_enable_layout,
+                expert_layout_model=expert_layout_model,
+                expert_layout_threshold=expert_layout_threshold,
+                expert_table_transformer=expert_table_transformer,
+                expert_per_region_ocr=expert_per_region_ocr,
+                expert_text_anchor=expert_text_anchor,
+                expert_text_anchor_threshold=expert_text_anchor_threshold,
+                expert_word_detector=expert_word_detector,
+                expert_assemble_from_regions=expert_assemble_from_regions,
+            )
+        finally:
+            self._run_client = None
+
+    async def _run_with_client(
+        self,
+        *,
+        selected_model: str,
+        inference_provider: str,
+        image_bytes: bytes,
+        content_type: str | None,
+        mode: str,
+        schema_name: str | None,
+        task: str | None,
+        custom_prompt: str | None,
+        token_limit: int | None,
+        gif_max_frames: int | None,
+        expert_enable_layout: bool | None,
+        expert_layout_model: str | None,
+        expert_layout_threshold: float | None,
+        expert_table_transformer: bool | None,
+        expert_per_region_ocr: bool | None,
+        expert_text_anchor: bool | None,
+        expert_text_anchor_threshold: float | None,
+        expert_word_detector: str | None,
+        expert_assemble_from_regions: bool | None,
+    ) -> OCRResult:
         selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
         selected_enable_layout = (
             self.enable_layout if expert_enable_layout is None else expert_enable_layout
@@ -768,11 +829,12 @@ class DocumentPipeline:
         if mode != "plain":
             return await self._fallback(
                 reason="Document-Pipeline unterstützt derzeit nur mode=plain; direkte Pipeline wurde verwendet.",
+                inference_provider=inference_provider,
                 image_bytes=image_bytes,
                 content_type=content_type,
                 mode=mode,
                 schema_name=schema_name,
-                model=model,
+                model=selected_model,
                 task=task,
                 custom_prompt=custom_prompt,
                 token_limit=token_limit,
@@ -782,11 +844,12 @@ class DocumentPipeline:
         if selected_task != PLAIN_TASK_OCR_TEXT or (custom_prompt and custom_prompt.strip()):
             return await self._fallback(
                 reason="Document-Pipeline unterstützt derzeit nur ocr_text ohne custom_prompt; direkte Pipeline wurde verwendet.",
+                inference_provider=inference_provider,
                 image_bytes=image_bytes,
                 content_type=content_type,
                 mode=mode,
                 schema_name=schema_name,
-                model=model,
+                model=selected_model,
                 task=task,
                 custom_prompt=custom_prompt,
                 token_limit=token_limit,
@@ -796,11 +859,12 @@ class DocumentPipeline:
         if content_type == "image/gif":
             return await self._fallback(
                 reason="GIF-Verarbeitung bleibt in der direkten Pipeline.",
+                inference_provider=inference_provider,
                 image_bytes=image_bytes,
                 content_type=content_type,
                 mode=mode,
                 schema_name=schema_name,
-                model=model,
+                model=selected_model,
                 task=task,
                 custom_prompt=custom_prompt,
                 token_limit=token_limit,
@@ -810,11 +874,12 @@ class DocumentPipeline:
         if not selected_enable_layout:
             return await self._fallback(
                 reason="Layout deaktiviert; direkte Pipeline wurde verwendet.",
+                inference_provider=inference_provider,
                 image_bytes=image_bytes,
                 content_type=content_type,
                 mode=mode,
                 schema_name=schema_name,
-                model=model,
+                model=selected_model,
                 task=task,
                 custom_prompt=custom_prompt,
                 token_limit=token_limit,
@@ -940,6 +1005,7 @@ class DocumentPipeline:
             schema_name=None,
             latency_ms=latency_ms,
             warnings=warnings,
+            inference_provider=inference_provider,
             layout=layout,
             layout_visualizations=None,
             page_infos=page_infos,
@@ -956,6 +1022,7 @@ class DocumentPipeline:
         self,
         *,
         reason: str,
+        inference_provider: str,
         image_bytes: bytes,
         content_type: str | None,
         mode: str,
@@ -976,6 +1043,7 @@ class DocumentPipeline:
             custom_prompt=custom_prompt,
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
+            inference_provider=inference_provider,
         )
         result.warnings.append(reason)
         return result

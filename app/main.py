@@ -19,7 +19,7 @@ from app.services.compare_engines import available_engines as compare_available_
 from app.services.document_pipeline import DocumentPipeline
 from app.services.mlflow_sink import make_sink as make_mlflow_sink
 from app.services.ocr_pipeline import OCRPipeline
-from app.services.ollama_client import OllamaClient
+from app.services.inference import create_vision_registry
 from app.services.warmed_example_store import WarmedExampleStore
 from app.services.word_detector import WordDetector, create_word_detector
 
@@ -59,13 +59,10 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app.state.logger = logger
 
-    ollama_client = OllamaClient(
-        base_url=settings.ollama_base_url,
-        timeout_s=settings.request_timeout_s,
-    )
+    vision_registry = create_vision_registry(settings)
     ocr_pipeline = OCRPipeline(
-        ollama_client=ollama_client,
-        default_model=settings.ollama_model,
+        vision_registry=vision_registry,
+        default_model=settings.inference_model,
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
         binarized_min_dim=settings.ocr_binarized_min_dim,
@@ -74,8 +71,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     )
     document_pipeline = DocumentPipeline(
         direct_pipeline=ocr_pipeline,
-        ollama_client=ollama_client,
-        default_model=settings.ollama_model,
+        vision_registry=vision_registry,
+        default_model=settings.inference_model,
         enable_layout=settings.ocr_expert_enable_layout,
         layout_model=settings.ocr_expert_layout_model,
         timeout_s=settings.request_timeout_s,
@@ -93,7 +90,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             "expert": document_pipeline,
         },
     )
-    app.state.ollama_client = ollama_client
+    app.state.vision_registry = vision_registry
+    app.state.vision_client = vision_registry.get(settings.inference_provider)
     app.state.ocr_pipeline = ocr_pipeline
     app.state.ocr_backend_router = ocr_backend_router
     app.state.analyze_operation_store = AnalyzeOperationStore(
@@ -197,7 +195,9 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             request=request,
             name="index.html",
             context={
-                "default_model": settings.ollama_model,
+                "default_model": settings.inference_model,
+                "inference_provider": settings.inference_provider,
+                "inference_providers": vision_registry.provider_ids,
                 "default_token_limit": settings.default_token_limit,
                 "default_backend": settings.ocr_backend,
                 "default_expert_enable_layout": settings.ocr_expert_enable_layout,

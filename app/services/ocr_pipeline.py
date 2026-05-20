@@ -15,7 +15,8 @@ from PIL import Image, ImageOps
 
 from app.schemas import SCHEMA_REGISTRY
 from app.services.deskew import deskew_image
-from app.services.ollama_client import OllamaClient, OllamaError
+from app.services.inference import InferenceError
+from app.services.inference.registry import VisionClientRegistry
 from app.services.structured import parse_structured_output
 
 PLAIN_TASK_OCR_TEXT = "ocr_text"
@@ -129,6 +130,7 @@ class OCRResult:
     schema_name: str | None
     latency_ms: int
     warnings: list[str]
+    inference_provider: str | None = None
     layout: list[dict[str, object]] | None = None
     layout_visualizations: list[str] | None = None
     page_infos: list[dict[str, object]] | None = None
@@ -217,7 +219,7 @@ class OCRPipeline:
     def __init__(
         self,
         *,
-        ollama_client: OllamaClient,
+        vision_registry: VisionClientRegistry,
         default_model: str,
         default_token_limit: int,
         max_image_dim: int,
@@ -229,18 +231,26 @@ class OCRPipeline:
             raise ValueError("default_token_limit muss eine positive ganze Zahl sein")
         if default_token_limit > MAX_TOKEN_LIMIT:
             raise ValueError(f"default_token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
-        self.ollama_client = ollama_client
+        self.vision_registry = vision_registry
+        self._run_client = None
         self.default_model = default_model
         self.default_token_limit = default_token_limit
         self.max_image_dim = max_image_dim
         self.binarized_min_dim = binarized_min_dim
         self.deskew_enabled = deskew_enabled
         self.deskew_min_angle_deg = deskew_min_angle_deg
+        self._run_inference_provider: str | None = None
         prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
         self.plain_prompt_template = (prompts_dir / "plain_ocr.txt").read_text(encoding="utf-8")
         self.structured_prompt_template = (prompts_dir / "structured_ocr.txt").read_text(
             encoding="utf-8"
         )
+
+    @property
+    def _vision_client(self):
+        if self._run_client is not None:
+            return self._run_client
+        return self.vision_registry.get(self.vision_registry.default_provider)
 
     @staticmethod
     def _build_page_info(
@@ -641,11 +651,11 @@ class OCRPipeline:
         selected_token_limit: int,
     ) -> str:
         classifier_prompt = self._build_schema_selection_prompt()
-        raw_choice = await self.ollama_client.run_ocr(
+        raw_choice = await self._vision_client.run_vision_chat(
             image_bytes=prepared_image,
             prompt=classifier_prompt,
             model=selected_model,
-            num_ctx=selected_token_limit,
+            max_tokens=selected_token_limit,
         )
         normalized = raw_choice.strip().lower().replace("`", "")
         for schema_name in SCHEMA_REGISTRY:
@@ -718,11 +728,11 @@ class OCRPipeline:
         has_custom_plain_prompt: bool,
     ) -> tuple[str, list[str]]:
         warnings: list[str] = []
-        raw_output = await self.ollama_client.run_ocr(
+        raw_output = await self._vision_client.run_vision_chat(
             image_bytes=prepared_image,
             prompt=prompt,
             model=selected_model,
-            num_ctx=selected_token_limit,
+            max_tokens=selected_token_limit,
         )
 
         if not has_custom_plain_prompt:
@@ -748,11 +758,11 @@ class OCRPipeline:
                 retry_prompt = self._build_plain_retry_prompt(selected_task=selected_plain_task)
                 if self._looks_like_prompt_echo(prompt=prompt, output=raw_output):
                     warnings.append("Prompt-Echo erkannt; Anfrage mit Kurzprompt wiederholt.")
-                raw_output = await self.ollama_client.run_ocr(
+                raw_output = await self._vision_client.run_vision_chat(
                     image_bytes=prepared_image,
                     prompt=retry_prompt,
                     model=selected_model,
-                    num_ctx=selected_token_limit,
+                    max_tokens=selected_token_limit,
                 )
                 needs_final_retry = False
                 if self._looks_like_prompt_echo(prompt=retry_prompt, output=raw_output):
@@ -778,11 +788,11 @@ class OCRPipeline:
                     final_retry_prompt = self._build_plain_final_retry_prompt(
                         selected_task=selected_plain_task
                     )
-                    raw_output = await self.ollama_client.run_ocr(
+                    raw_output = await self._vision_client.run_vision_chat(
                         image_bytes=prepared_image,
                         prompt=final_retry_prompt,
                         model=selected_model,
-                        num_ctx=selected_token_limit,
+                        max_tokens=selected_token_limit,
                     )
                     if is_empty_markdown_wrapper(raw_output):
                         warnings.append("Modell liefert weiterhin eine leere Markdown-Hülle.")
@@ -879,10 +889,46 @@ class OCRPipeline:
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
         expert_assemble_from_regions: bool | None = None,
+        inference_provider: str | None = None,
+    ) -> OCRResult:
+        resolved = self.vision_registry.resolve(
+            inference_provider=inference_provider,
+            model=model,
+        )
+        self._run_client = resolved.client
+        self._run_inference_provider = resolved.provider_id
+        try:
+            return await self._run_resolved(
+                resolved_model=resolved.model_id,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                mode=mode,
+                schema_name=schema_name,
+                task=task,
+                custom_prompt=custom_prompt,
+                token_limit=token_limit,
+                gif_max_frames=gif_max_frames,
+            )
+        finally:
+            self._run_client = None
+            self._run_inference_provider = None
+
+    async def _run_resolved(
+        self,
+        *,
+        resolved_model: str,
+        image_bytes: bytes,
+        content_type: str | None,
+        mode: str,
+        schema_name: str | None,
+        task: str | None,
+        custom_prompt: str | None,
+        token_limit: int | None,
+        gif_max_frames: int | None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
-        selected_model = (model or "").strip() or self.default_model
+        selected_model = resolved_model
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
         selected_gif_max_frames = (
             DEFAULT_GIF_MAX_FRAMES if gif_max_frames is None else gif_max_frames
@@ -1001,11 +1047,11 @@ class OCRPipeline:
             raw_outputs: list[str] = []
             parsed_payloads: list[dict[str, object]] = []
             for page_index, prepared_image in enumerate(prepared_images, start=1):
-                raw_output = await self.ollama_client.run_ocr(
+                raw_output = await self._vision_client.run_vision_chat(
                     image_bytes=prepared_image,
                     prompt=prompt,
                     model=selected_model,
-                    num_ctx=selected_token_limit,
+                    max_tokens=selected_token_limit,
                 )
                 raw_outputs.append(raw_output.strip())
                 parse_result = parse_structured_output(raw_output, expected_fields)
@@ -1038,11 +1084,11 @@ class OCRPipeline:
                 try:
                     has_visible_text = False
                     for prepared_image in prepared_images:
-                        evidence_text = await self.ollama_client.run_ocr(
+                        evidence_text = await self._vision_client.run_vision_chat(
                             image_bytes=prepared_image,
                             prompt=self.plain_prompt_template,
                             model=selected_model,
-                            num_ctx=min(selected_token_limit, 4096),
+                            max_tokens=min(selected_token_limit, 4096),
                         )
                         if not self._is_no_visible_text(evidence_text):
                             has_visible_text = True
@@ -1052,7 +1098,7 @@ class OCRPipeline:
                         warnings.append(
                             "Kein sichtbarer Text erkannt; strukturierte Felder wurden auf null gesetzt."
                         )
-                except OllamaError as exc:
+                except InferenceError as exc:
                     warnings.append(f"Evidenzprüfung für strukturierte Ausgabe übersprungen: {exc}")
 
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -1064,6 +1110,7 @@ class OCRPipeline:
             schema_name=resolved_schema_name,
             latency_ms=latency_ms,
             warnings=warnings,
+            inference_provider=self._run_inference_provider,
             page_infos=response_page_infos,
             page_texts=response_page_texts,
             page_images=(
