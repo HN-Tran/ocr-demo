@@ -12,7 +12,7 @@ from app.services.document_pipeline import (
     _strip_table_markup,
 )
 from app.services.ocr_pipeline import OCRPipeline, OCRResult
-from app.services.ollama_client import OllamaClient
+from app.services.inference.registry import VisionClientRegistry
 
 
 def _png_bytes() -> bytes:
@@ -57,12 +57,25 @@ class _FakeDirectPipeline:
 
 
 class _FakeOllamaClient:
+    provider_id = "ollama"
+
     def __init__(self, response: str = "OCR text") -> None:
         self.response = response
         self.calls = 0
 
-    async def run_ocr(
-        self, *, image_bytes: bytes, prompt: str, model: str, num_ctx: int | None = None
+    async def list_models(self) -> list[str]:
+        return ["test-model"]
+
+    async def supports_vision(self, model: str) -> bool:
+        return True
+
+    async def run_vision_chat(
+        self,
+        *,
+        image_bytes: bytes,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
     ) -> str:
         self.calls += 1
         return self.response
@@ -74,7 +87,11 @@ def _make_pipeline(
 ) -> DocumentPipeline:
     return DocumentPipeline(
         direct_pipeline=cast(OCRPipeline, direct or _FakeDirectPipeline()),
-        ollama_client=cast(OllamaClient, ollama or _FakeOllamaClient()),
+        vision_registry=VisionClientRegistry(
+            clients={"ollama": ollama or _FakeOllamaClient()},
+            default_provider="ollama",
+            default_model="test-model",
+        ),
         default_model="test-model",
         enable_layout=True,
         layout_model="test/layout-model",

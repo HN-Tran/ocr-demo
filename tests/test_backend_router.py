@@ -32,6 +32,7 @@ class _FakeService:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
     ) -> OCRResult:
         self.calls += 1
         return OCRResult(

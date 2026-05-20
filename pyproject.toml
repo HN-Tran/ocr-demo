@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "docread"
 version = "0.2.4"
-description = "Document OCR service with Ollama and FastAPI"
+description = "Document OCR API with pluggable vision LLM backends (Ollama, OpenAI-compatible servers) and FastAPI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

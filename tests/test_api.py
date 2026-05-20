@@ -87,6 +87,7 @@ class FakeBackendRouter:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -104,6 +105,7 @@ class FakeBackendRouter:
             "expert_layout_model": expert_layout_model,
             "expert_table_transformer": expert_table_transformer,
             "expert_word_detector": expert_word_detector,
+            "inference_provider": inference_provider,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
@@ -192,6 +194,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -207,6 +210,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_table_transformer=expert_table_transformer,
+            inference_provider=inference_provider,
             expert_word_detector=expert_word_detector,
         )
         result.page_infos = None
@@ -220,8 +224,17 @@ def _pipeline() -> OCRBackendRouter:
 
 
 def test_health() -> None:
-    payload = asyncio.run(health())
+    from starlette.testclient import TestClient
+
+    from app.main import _create_ocr_app
+    from tests.test_main import _settings
+
+    client = TestClient(_create_ocr_app(settings=_settings()))
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["status"] == "ok"
+    assert "inference_providers" in payload
 
 
 def test_schemas_contains_new_presets() -> None:

@@ -1,15 +1,15 @@
 [English](README.md) · [Deutsch](README_DE.md)
 
-# docread (Ollama + FastAPI)
+# docread (FastAPI + austauschbare Vision-LLMs)
 
-Dokument-OCR-Dienst mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive schlanker Weboberfläche und Evaluations-Runner.
+Dokument-OCR-Dienst mit Vision-Sprachmodellen über ein FastAPI-Backend. Standard ist Ollama; alternativ OpenAI-kompatible Server (llama.cpp, vLLM, …). Inklusive schlanker Weboberfläche und Evaluations-Runner.
 
 ## Funktionen
 
 - `POST /api/ocr` für Klartext- oder strukturierte Extraktion
 - `POST /api/compare` für Side-by-Side-Vergleich gegen externe Engines (Azure, docread-Peer, Google Vision, Plain-Text-Endpoint) inklusive Metriken-Panel und optionalem CER/WER gegen Referenztext
 - `POST /api/benchmark` für Batch-Benchmarks (N Dateien × M Runner) mit Live-Progress, CSV-Export und optionalem MLflow-Tracking
-- `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
+- `GET /api/models` zum Auflisten der Modelle des konfigurierten Inference-Providers
 - `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
 - `GET /docs` (Swagger UI) und `GET /redoc` (ReDoc) für die interaktive API-Dokumentation
 - Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen JSON-Vorgaben (Rechnung, Beleg, Tabelle, Visitenkarte), Hell/Dunkel-Modus, Bild/PDF-Vorschau, JSON-Highlighting und CSV-Download für Tabellen
@@ -20,8 +20,7 @@ Dokument-OCR-Dienst mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusiv
 
 - Python 3.12+
 - `uv` 0.10+
-- Laufende Ollama-Instanz (Standard: `http://localhost:11434`)
-- Ein vision-fähiges Modell in Ollama
+- Ein vision-fähiges Modell auf dem Inference-Backend (Standard Ollama, oder OpenAI-kompatibler Server)
 
 ## Setup
 
@@ -32,8 +31,14 @@ uv sync --all-groups
 Optionale Umgebungsvariablen:
 
 ```bash
-export OLLAMA_BASE_URL="http://localhost:11434"
-export OLLAMA_MODEL="glm-ocr:latest"
+export INFERENCE_PROVIDER="ollama"              # ollama | openai_compatible
+export INFERENCE_BASE_URL="http://localhost:11434"
+export INFERENCE_MODEL="glm-ocr:latest"
+# OpenAI-kompatibel (vLLM / llama.cpp):
+# export INFERENCE_PROVIDER="openai_compatible"
+# export INFERENCE_BASE_URL="http://localhost:8000/v1"
+# export INFERENCE_MODEL="dein-vision-modell"
+# Legacy-Aliase: OLLAMA_BASE_URL, OLLAMA_MODEL
 export OCR_BACKEND="direct" # direct | expert
 export OCR_EXPERT_MODE="selfhosted"
 export OCR_EXPERT_ENABLE_LAYOUT="true"

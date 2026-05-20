@@ -90,6 +90,7 @@ class FakeBackendRouter:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -106,6 +107,7 @@ class FakeBackendRouter:
             "expert_layout_model": expert_layout_model,
             "expert_table_transformer": expert_table_transformer,
             "expert_word_detector": expert_word_detector,
+            "inference_provider": inference_provider,
         }
         result = type(
             "OCRResult",
@@ -189,6 +191,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -204,6 +207,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_table_transformer=expert_table_transformer,
+            inference_provider=inference_provider,
             expert_word_detector=expert_word_detector,
         )
         result.layout = None

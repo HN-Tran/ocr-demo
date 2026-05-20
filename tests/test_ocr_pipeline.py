@@ -12,7 +12,7 @@ from app.services.ocr_pipeline import (
     PLAIN_TASK_PROMPTS,
     OCRPipeline,
 )
-from app.services.ollama_client import OllamaClient
+from app.services.inference.registry import VisionClientRegistry
 
 
 def _png_bytes() -> bytes:
@@ -24,22 +24,35 @@ def _png_bytes() -> bytes:
 
 
 class FakeOllamaClient:
+    provider_id = "ollama"
+
     def __init__(self, responses: list[str] | None = None) -> None:
         self.last_prompt = ""
         self.prompts: list[str] = []
         self.last_model = ""
-        self.last_num_ctx: int | None = None
+        self.last_max_tokens: int | None = None
         self.last_image_bytes = b""
         self.responses = list(responses) if responses is not None else []
 
-    async def run_ocr(
-        self, *, image_bytes: bytes, prompt: str, model: str, num_ctx: int | None = None
+    async def list_models(self) -> list[str]:
+        return ["glm-ocr:latest"]
+
+    async def supports_vision(self, model: str) -> bool:
+        return True
+
+    async def run_vision_chat(
+        self,
+        *,
+        image_bytes: bytes,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
     ) -> str:
         self.last_image_bytes = image_bytes
         self.last_prompt = prompt
         self.prompts.append(prompt)
         self.last_model = model
-        self.last_num_ctx = num_ctx
+        self.last_max_tokens = max_tokens
         if self.responses:
             return self.responses.pop(0)
         return "ok"
@@ -86,9 +99,17 @@ def _gif_bytes(frame_count: int = 1) -> bytes:
     return output.getvalue()
 
 
+def _registry(fake_client: FakeOllamaClient) -> VisionClientRegistry:
+    return VisionClientRegistry(
+        clients={"ollama": fake_client},
+        default_provider="ollama",
+        default_model="glm-ocr:latest",
+    )
+
+
 def _pipeline(fake_client: FakeOllamaClient) -> OCRPipeline:
     return OCRPipeline(
-        ollama_client=cast(OllamaClient, fake_client),
+        vision_registry=_registry(fake_client),
         default_model="glm-ocr:latest",
         default_token_limit=4096,
         max_image_dim=2048,
@@ -446,7 +467,7 @@ def test_default_token_limit_is_forwarded() -> None:
             token_limit=None,
         )
     )
-    assert fake_client.last_num_ctx == 4096
+    assert fake_client.last_max_tokens == 4096
 
 
 def test_token_limit_override_is_forwarded() -> None:
@@ -460,7 +481,7 @@ def test_token_limit_override_is_forwarded() -> None:
             token_limit=8192,
         )
     )
-    assert fake_client.last_num_ctx == 8192
+    assert fake_client.last_max_tokens == 8192
 
 
 def test_token_limit_must_be_positive() -> None:
