@@ -1,0 +1,101 @@
+# Push vX.Y.Z after green CI; bump pyproject on master; GitHub Release with auto-generated notes.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Release v${VERSION} at commit ${GITHUB_SHA}"
+
+      - name: Wait for CI on tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${GITHUB_SHA}"
+          REPO="${{ github.repository }}"
+          for attempt in $(seq 1 60); do
+            read -r status conclusion < <(
+              gh run list --repo "${REPO}" --commit "${SHA}" --workflow CI \
+                --json status,conclusion -q '.[0] | "\(.status) \(.conclusion)"' \
+                2>/dev/null || echo "missing "
+            )
+            if [[ "${status}" == "completed" ]]; then
+              if [[ "${conclusion}" == "success" ]]; then
+                echo "CI succeeded for ${SHA}"
+                exit 0
+              fi
+              echo "CI finished with conclusion: ${conclusion}"
+              exit 1
+            fi
+            echo "CI not done yet (${attempt}/60): status=${status} conclusion=${conclusion}"
+            sleep 30
+          done
+          echo "Timed out after 30 minutes waiting for CI on ${SHA}"
+          exit 1
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump pyproject version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" pyproject.toml
+          uv lock
+
+      - name: Commit release prep to master
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          MASTER_SHA=$(git rev-parse origin/master)
+          if [[ "${MASTER_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "origin/master (${MASTER_SHA}) is not the tagged commit (${GITHUB_SHA})."
+            echo "Tag the current master tip after CI is green."
+            exit 1
+          fi
+          git checkout -B master "${GITHUB_SHA}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "chore(release): Release v${VERSION}"
+          git push origin master
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists."
+            exit 0
+          fi
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes

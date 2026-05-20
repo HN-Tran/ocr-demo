@@ -4,6 +4,8 @@
 
 Document OCR service using vision language models via a FastAPI backend. Inference defaults to Ollama and can use OpenAI-compatible servers (llama.cpp, vLLM, etc.). Includes a lightweight web UI and evaluation runner.
 
+**Releases:** [GitHub Releases](https://github.com/HN-Tran/docread/releases) (baseline **v0.1.0**).
+
 ## Features
 
 - `POST /api/ocr` for plain-text or structured extraction
