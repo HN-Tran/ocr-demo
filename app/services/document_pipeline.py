@@ -450,18 +450,20 @@ class DocumentPipeline:
         self.text_anchor_threshold = text_anchor_threshold
         self.word_detector: WordDetector | None = word_detector
         self.layout_max_dim = max(256, int(layout_max_dim))
+        # Inherited from direct_pipeline so both pipelines share one setting.
+        self.deskew_enabled = bool(getattr(direct_pipeline, "deskew_enabled", False))
+        self.deskew_min_angle_deg = float(
+            getattr(direct_pipeline, "deskew_min_angle_deg", 0.5)
+        )
+        self._detector_cache: dict[str, HFLayoutDetector] = {}
+        self._table_recognizer: TableStructureRecognizer | None = None
+        self._word_detector_cache: dict[str, WordDetector | None] = {}
 
     @property
     def _vision_client(self):
         if self._run_client is not None:
             return self._run_client
         return self.vision_registry.get(self.vision_registry.default_provider)
-        # Inherited from direct_pipeline so both pipelines share one setting.
-        self.deskew_enabled = direct_pipeline.deskew_enabled
-        self.deskew_min_angle_deg = direct_pipeline.deskew_min_angle_deg
-        self._detector_cache: dict[str, HFLayoutDetector] = {}
-        self._table_recognizer: TableStructureRecognizer | None = None
-        self._word_detector_cache: dict[str, WordDetector | None] = {}
 
     # ------------------------------------------------------------------
     # Detector management
@@ -993,7 +995,7 @@ class DocumentPipeline:
 
         region_count = sum(len(cast(list, p.get("regions", []))) for p in layout)
         warnings.append(
-            f"Document-Layout: {region_count} Regionen auf {len(layout)} Seite(n) erkannt."
+            f"Document layout: {region_count} regions detected on {len(layout)} page(s)."
         )
 
         latency_ms = int((time.perf_counter() - start) * 1000)

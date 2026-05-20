@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -15,7 +16,8 @@ from app.config import Settings, get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.benchmark import BenchmarkJobStore
-from app.services.compare_engines import available_engines as compare_available_engines
+from app.i18n import SUPPORTED_LOCALES, load_messages, resolve_locale
+from app.i18n.compare import available_engines as localized_compare_engines
 from app.services.document_pipeline import DocumentPipeline
 from app.services.mlflow_sink import make_sink as make_mlflow_sink
 from app.services.ocr_pipeline import OCRPipeline
@@ -41,6 +43,22 @@ def _normalize_base_path(value: str) -> str:
     if not path.startswith("/"):
         path = f"/{path}"
     return path.rstrip("/")
+
+
+def _ui_context(request: Request, settings: Settings) -> dict[str, Any]:
+    locale = resolve_locale(
+        settings_locale=settings.app_locale,
+        cookie=request.cookies.get("app_locale"),
+        query=request.query_params.get("lang"),
+    )
+    ui = load_messages(locale)
+    catalog = {code: load_messages(code) for code in SUPPORTED_LOCALES}
+    return {
+        "app_locale": locale,
+        "ui": ui,
+        "ui_messages_json": json.dumps(ui, ensure_ascii=False),
+        "ui_catalog_json": json.dumps(catalog, ensure_ascii=False),
+    }
 
 
 def _status_payload() -> dict[str, str]:
@@ -179,7 +197,13 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             request=request,
             name="benchmark.html",
             context={
-                "compare_engines": compare_available_engines(),
+                **_ui_context(request, settings),
+                "compare_engines": localized_compare_engines(
+                    resolve_locale(
+                        settings_locale=settings.app_locale,
+                        cookie=request.cookies.get("app_locale"),
+                    )
+                ),
                 "azure_preset_label": f"{settings.azure_preset_label} (Plain)" if settings.azure_preset_label else "",
                 "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
                 "static_version": version,
@@ -191,10 +215,16 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     async def home(request: Request) -> HTMLResponse:
         version = cast(str, request.app.state.static_version)
         app_base_path = cast(str, request.scope.get("root_path", ""))
+        locale = resolve_locale(
+            settings_locale=settings.app_locale,
+            cookie=request.cookies.get("app_locale"),
+            query=request.query_params.get("lang"),
+        )
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
+                **_ui_context(request, settings),
                 "default_model": settings.inference_model,
                 "inference_provider": settings.inference_provider,
                 "inference_providers": vision_registry.provider_ids,
@@ -214,7 +244,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "azure_preset_endpoint": settings.azure_preset_endpoint,
                 "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
                 "azure_preset_layout_endpoint": settings.azure_preset_layout_endpoint,
-                "compare_engines": compare_available_engines(),
+                "compare_engines": localized_compare_engines(locale),
                 "examples": [
                     {"slot": idx + 1, "label": label}
                     for idx, (label, _path) in enumerate(settings.examples)

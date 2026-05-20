@@ -5,8 +5,18 @@ services:
       target: runtime
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       APP_BASE_PATH: ${APP_BASE_PATH:-}
+      APP_LOCALE: ${APP_LOCALE:-en}
+      INFERENCE_PROVIDER: ${INFERENCE_PROVIDER:-ollama}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-}
+      INFERENCE_MODEL: ${INFERENCE_MODEL:-}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      INFERENCE_VISION_MODELS: ${INFERENCE_VISION_MODELS:-}
+      INFERENCE_VISION_PROBE: ${INFERENCE_VISION_PROBE:-true}
+      INFERENCE_EXTRA_PROVIDERS: ${INFERENCE_EXTRA_PROVIDERS:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://172.17.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-glm-ocr:latest}
       OCR_BACKEND: ${OCR_BACKEND:-expert}

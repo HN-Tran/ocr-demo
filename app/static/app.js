@@ -96,6 +96,25 @@ const compareReferenceEl = document.getElementById("compare-reference");
 const metricsPanelEl = document.getElementById("metrics-panel");
 const metricsContentEl = document.getElementById("metrics-content");
 const metricsTabBtns = Array.from(document.querySelectorAll("[data-metrics-tab]"));
+const tr = (key, params) =>
+  typeof window.docreadT === "function" ? window.docreadT(key, params) : key;
+
+function translateWarning(message) {
+  if (!message || typeof message !== "string") return message;
+  const deLayout = message.match(
+    /^Document-Layout: (\d+) Regionen auf (\d+) Seite\(n\) erkannt\.$/
+  );
+  if (deLayout) {
+    return tr("warning_document_layout", { regions: deLayout[1], pages: deLayout[2] });
+  }
+  const enLayout = message.match(
+    /^Document layout: (\d+) regions detected on (\d+) page\(s\)\.$/i
+  );
+  if (enLayout) {
+    return tr("warning_document_layout", { regions: enLayout[1], pages: enLayout[2] });
+  }
+  return message;
+}
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
 const compareEndpoint = `${appBasePath}/api/compare`;
@@ -103,6 +122,8 @@ const extractPdfTextEndpoint = `${appBasePath}/api/extract-pdf-text`;
 const referenceMetricsEndpoint = `${appBasePath}/api/metrics/reference`;
 
 let lastResponse = null;
+let lastCompareResponse = null;
+let lastOcrApplyContext = null;
 let lastDiff = null;
 let lastMetrics = null;
 let activeMetricsTab = "intrinsic";
@@ -221,7 +242,7 @@ function toggleModeDependentFields() {
 function setAdvancedOpen(isOpen) {
   advancedPanelEl.classList.toggle("is-collapsed", !isOpen);
   advancedToggleEl.setAttribute("aria-expanded", String(isOpen));
-  advancedToggleEl.textContent = isOpen ? "Expertenoptionen ausblenden" : "Expertenoptionen";
+  advancedToggleEl.textContent = isOpen ? tr("advanced_toggle_hide") : tr("advanced_toggle");
 }
 
 function setLoading(isLoading) {
@@ -305,7 +326,7 @@ function firstDroppedFile(event) {
   return event.dataTransfer.files[0];
 }
 
-function clearPreview(message = "Keine Datei ausgewählt.") {
+function clearPreview(message = null) {
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
     previewUrl = null;
@@ -313,6 +334,7 @@ function clearPreview(message = "Keine Datei ausgewählt.") {
   pageImageDataUrls = [];
   currentPageIndex = 0;
   pageSelectorWrapEl.classList.add("hidden");
+  if (message == null) message = tr("preview_empty");
   previewEmptyEl.textContent = message;
   previewEmptyEl.classList.remove("hidden");
   previewImageStageEl.classList.add("hidden");
@@ -387,19 +409,19 @@ function updatePreview() {
   }
 
   if (file.type === "application/pdf") {
-    previewEmptyEl.textContent = "PDF-Vorschau wird nach OCR angezeigt.";
+    previewEmptyEl.textContent = tr("preview_pdf_pending");
     previewEmptyEl.classList.remove("hidden");
     return;
   }
 
   if (isTiffLikeFile(file)) {
-    previewEmptyEl.textContent = "TIFF-Vorschau wird nach OCR angezeigt.";
+    previewEmptyEl.textContent = tr("preview_tiff_pending");
     previewEmptyEl.classList.remove("hidden");
     return;
   }
 
   if (WORD_DOCUMENT_TYPES.has(file.type) || fileExtension(file.name) === ".doc" || fileExtension(file.name) === ".docx") {
-    previewEmptyEl.textContent = "Word-Vorschau wird nach OCR angezeigt.";
+    previewEmptyEl.textContent = tr("preview_word_pending");
     previewEmptyEl.classList.remove("hidden");
     return;
   }
@@ -416,7 +438,7 @@ function populatePageSelector(pageCount) {
   for (let i = 0; i < pageCount; i++) {
     const opt = document.createElement("option");
     opt.value = String(i);
-    opt.textContent = `Seite ${i + 1}`;
+    opt.textContent = tr("page_n", { n: i + 1 });
     pageSelectorEl.appendChild(opt);
   }
   pageSelectorWrapEl.classList.toggle("hidden", pageCount <= 1);
@@ -877,7 +899,7 @@ function renderWordSidebar(annotatedWords, regions) {
   if (!wordsPagesEl) return;
   wordsPagesEl.innerHTML = "";
   if (wordsSummaryEl) {
-    wordsSummaryEl.textContent = `${annotatedWords.length} Wörter in ${regions.length} Region${regions.length === 1 ? "" : "en"}`;
+    wordsSummaryEl.textContent = tr("words_summary", { count: annotatedWords.length, regions: regions.length });
   }
 
   // Build ordered groups from regions, then a catch-all
@@ -1032,8 +1054,8 @@ function renderDiffOverlay(diff) {
   matched.forEach((pair, idx) => {
     const key = `m-${idx}`;
     const text = pair.ours?.content || pair.azure?.content || "";
-    addShape(pair.ours, "preview-diff-shape-matched", `Übereinstimmung: ${text}`, key);
-    addShape(pair.azure, "preview-diff-shape-matched preview-diff-shape-matched-azure", `Übereinstimmung (Azure): ${text}`, key);
+    addShape(pair.ours, "preview-diff-shape-matched", tr("diff_match_tooltip", { text }), key);
+    addShape(pair.azure, "preview-diff-shape-matched preview-diff-shape-matched-azure", tr("diff_match_azure_tooltip", { engine: "Azure", text }), key);
   });
   mismatched.forEach((pair, idx) => {
     const key = `x-${idx}`;
@@ -1044,10 +1066,10 @@ function renderDiffOverlay(diff) {
     addShape(pair.azure, "preview-diff-shape-mismatch preview-diff-shape-mismatch-azure", title, key);
   });
   onlyOurs.forEach((w, idx) => {
-    addShape(w, "preview-diff-shape-ours", `Nur wir: ${w.content || ""}`, `o-${idx}`);
+    addShape(w, "preview-diff-shape-ours", tr("diff_tooltip_ours_only", { text: w.content || "" }), `o-${idx}`);
   });
   onlyAzure.forEach((w, idx) => {
-    addShape(w, "preview-diff-shape-azure", `Nur Azure: ${w.content || ""}`, `a-${idx}`);
+    addShape(w, "preview-diff-shape-azure", tr("diff_tooltip_theirs_only", { name: "Azure", text: w.content || "" }), `a-${idx}`);
   });
 }
 
@@ -1118,7 +1140,7 @@ function renderDiffPanel(diff) {
     li.textContent = w.content || "";
     if (!hasBox(w)) {
       li.dataset.hasBox = "false";
-      li.title = "Keine Koordinaten — Token kommt nur im Seitentext vor.";
+      li.title = tr("diff_token_no_coords");
     }
     diffOursListEl.appendChild(li);
   });
@@ -1175,7 +1197,7 @@ function renderLayoutVisualizations(visualizations) {
   visualizations.forEach((source, index) => {
     const imgEl = document.createElement("img");
     imgEl.src = String(source);
-    imgEl.alt = `Layout-Visualisierung ${index + 1}`;
+    imgEl.alt = tr("layout_viz_alt", { index: index + 1 });
     imgEl.loading = "lazy";
     layoutVisualizationsEl.appendChild(imgEl);
   });
@@ -1206,21 +1228,28 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
   if (layoutPages.length > 0) {
     summaryParts.push(
       layoutPages.length > 1
-        ? `Seite ${activeIndex + 1}/${layoutPages.length}`
-        : `${layoutPages.length} Seite`
+        ? tr("layout_summary_page_multi", {
+            current: activeIndex + 1,
+            total: layoutPages.length,
+          })
+        : tr("layout_summary_pages_one", { count: layoutPages.length })
     );
-    summaryParts.push(`${regionCount} Region(en)`);
+    summaryParts.push(tr("layout_summary_regions", { count: regionCount }));
   }
   if (confidenceStats) {
     summaryParts.push(
-      `Vertrauen: Ø ${formatConfidence(confidenceStats.average)}`
+      tr("layout_summary_confidence", {
+        value: formatConfidence(confidenceStats.average),
+      })
     );
     summaryParts.push(
-      `${confidenceStats.count} Score${confidenceStats.count === 1 ? "" : "s"}`
+      tr("layout_summary_scores", { count: confidenceStats.count })
     );
   }
   if (Array.isArray(visualizations) && visualizations.length > 0) {
-    summaryParts.push(`${visualizations.length} Visualisierung(en)`);
+    summaryParts.push(
+      tr("layout_summary_visualizations", { count: visualizations.length })
+    );
   }
   layoutSummaryEl.textContent = summaryParts.join(" | ");
 
@@ -1230,14 +1259,14 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
 
     const pageTitleEl = document.createElement("p");
     pageTitleEl.className = "layout-page-title";
-    pageTitleEl.textContent = `Seite ${page.page_number || pageIndex + 1}`;
+    pageTitleEl.textContent = tr("page_n", { n: page.page_number || pageIndex + 1 });
     pageCardEl.appendChild(pageTitleEl);
 
     const regions = Array.isArray(page.regions) ? page.regions : [];
     if (regions.length === 0) {
       const emptyEl = document.createElement("p");
       emptyEl.className = "layout-page-empty";
-      emptyEl.textContent = "Keine Regionen im Layout-Output.";
+      emptyEl.textContent = tr("layout_no_regions");
       pageCardEl.appendChild(emptyEl);
       layoutPagesEl.appendChild(pageCardEl);
       return;
@@ -1351,7 +1380,7 @@ function buildPayload() {
   if (tokenLimitRaw) {
     const tokenLimit = Number(tokenLimitRaw);
     if (!Number.isInteger(tokenLimit) || tokenLimit < 1) {
-      throw new Error("Token-Limit muss eine positive ganze Zahl sein.");
+      throw new Error(tr("token_limit_invalid"));
     }
     if (tokenLimit > MAX_TOKEN_LIMIT) {
       throw new Error(`Token-Limit darf ${MAX_TOKEN_LIMIT} nicht überschreiten.`);
@@ -1365,7 +1394,7 @@ function buildPayload() {
   if (gifMaxFramesRaw) {
     const gifMaxFrames = Number(gifMaxFramesRaw);
     if (!Number.isInteger(gifMaxFrames) || gifMaxFrames < 1) {
-      throw new Error("GIF-Frames muss eine positive ganze Zahl sein.");
+      throw new Error(tr("gif_frames_invalid"));
     }
     if (gifMaxFrames > MAX_GIF_FRAMES) {
       throw new Error(`GIF-Frames darf ${MAX_GIF_FRAMES} nicht überschreiten.`);
@@ -1880,8 +1909,9 @@ function renderMarkdownPreview(markdown) {
 
 function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
   lastResponse = data;
+  lastOcrApplyContext = { requestMode, requestTask, backendFallback };
   setAdvancedDirty(false);
-  let displayText = data.text || "(kein Inhalt)";
+  let displayText = data.text || tr("no_content");
   const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
   let tableMatrices = [];
 
@@ -1920,8 +1950,8 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     lastDiff = null;
     lastMetrics = null;
     renderMetricsPanel(null);
-    if (diffHeadingEl) diffHeadingEl.textContent = "Vergleich";
-    if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = "Nur Andere";
+    if (diffHeadingEl) diffHeadingEl.textContent = tr("diff_heading");
+    if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = tr("diff_theirs_default");
     if (diffGroupsEl) diffGroupsEl.classList.add("hidden");
     diffEmptyEl?.classList.remove("hidden");
     clearDiffPanel();
@@ -1960,9 +1990,13 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     jsonOutputEl.innerHTML = "";
   }
 
-  const warnings = (data.warnings || []).join(" | ");
+  const warnings = (data.warnings || [])
+    .map((w) => translateWarning(String(w)))
+    .join(" | ");
   const backend = data.backend || backendFallback || "direct";
-  metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
+  metaEl.textContent =
+    tr("meta_backend", { backend, model: data.model, latency: data.latency_ms }) +
+    (warnings ? tr("meta_warnings", { warnings }) : "");
 
   void maybeFetchReferenceMetrics(data?.text || "");
 }
@@ -2000,6 +2034,7 @@ async function maybeFetchReferenceMetrics(hypothesisText) {
 }
 
 function applyCompareResponse(data) {
+  lastCompareResponse = data;
   lastDiff = data?.diff || null;
   lastMetrics = data?.metrics || null;
   const pageCount = Array.isArray(lastDiff?.pages) ? lastDiff.pages.length : 0;
@@ -2008,10 +2043,11 @@ function applyCompareResponse(data) {
   const onlyOursTotal = lastDiff?.only_ours_count ?? 0;
   const onlyTheirsTotal = lastDiff?.only_theirs_count ?? lastDiff?.only_azure_count ?? 0;
 
-  const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
+  const pageLabel =
+    pageCount > 1 ? ` ${tr("compare_all_pages", { count: pageCount })}` : "";
   const theirsLabel = data?.engine?.label || "Andere";
-  if (diffHeadingEl) diffHeadingEl.textContent = `Vergleich · ${theirsLabel}`;
-  if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = `Nur ${theirsLabel}`;
+  if (diffHeadingEl) diffHeadingEl.textContent = tr("diff_heading_engine", { engine: theirsLabel });
+  if (diffTheirsLabelEl) diffTheirsLabelEl.textContent = tr("diff_theirs_named", { name: theirsLabel });
   const ourWarnings = Array.isArray(data?.our_warnings) ? data.our_warnings : [];
   const theirWarnings = Array.isArray(data?.their_warnings) ? data.their_warnings : [];
   const warningsHtml = [
@@ -2021,10 +2057,10 @@ function applyCompareResponse(data) {
     ),
   ].join("");
   compareSummaryEl.innerHTML =
-    `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
-    `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
-    `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
-    `<span class="diff-legend-item diff-legend-azure">Nur ${escapeHtml(theirsLabel)}: <b>${onlyTheirsTotal}</b></span>` +
+    `<span class="diff-legend-item diff-legend-matched">${tr("diff_summary_matched", { n: matchedTotal })}</span> | ` +
+    `<span class="diff-legend-item diff-legend-mismatch">${tr("diff_summary_mismatch", { n: mismatchedTotal })}</span> | ` +
+    `<span class="diff-legend-item diff-legend-ours">${tr("diff_summary_ours", { n: onlyOursTotal })}</span> | ` +
+    `<span class="diff-legend-item diff-legend-azure">${tr("diff_summary_theirs", { name: escapeHtml(theirsLabel), n: onlyTheirsTotal })}</span>` +
     `<span class="compare-total-hint">${pageLabel}</span>` +
     warningsHtml;
   compareSummaryEl.classList.remove("hidden");
@@ -2063,7 +2099,7 @@ function _metricRow(label, valueOurs, valueTheirs, { tooltip } = {}) {
 }
 
 function _renderIntrinsicTab(intrinsic) {
-  if (!intrinsic) return `<p class="compare-reference-hint">Keine Daten.</p>`;
+  if (!intrinsic) return `<p class="compare-reference-hint">${tr("metrics_no_data")}</p>`;
   const ours = intrinsic.ours || {};
   const theirs = intrinsic.theirs || {};
   const fmtConf = (v) => _fmtNumber(v, { digits: 3 });
@@ -2078,7 +2114,7 @@ function _renderIntrinsicTab(intrinsic) {
       fmtConf(theirs.avg_confidence),
       {
         tooltip:
-          "Durchschnittliche Konfidenz pro Wort, sofern die Engine sie liefert. Nicht zwischen Engines vergleichbar (unterschiedliche Kalibrierung).",
+          tr("metrics_tooltip_avg_confidence"),
       },
     ),
     _metricRow("Latenz", fmtMs(ours.latency_ms), fmtMs(theirs.latency_ms)),
@@ -2092,23 +2128,23 @@ function _renderIntrinsicTab(intrinsic) {
 }
 
 function _renderComparisonTab(comparison) {
-  if (!comparison) return `<p class="compare-reference-hint">Keine Daten.</p>`;
+  if (!comparison) return `<p class="compare-reference-hint">${tr("metrics_no_data")}</p>`;
   const fmt = (v) => _fmtNumber(v, { digits: 3 });
   const fmtPct = (v) => _fmtNumber(v, { percent: true });
   return `
-    <p class="metrics-section-title">Symmetrische Abweichung</p>
+    <p class="metrics-section-title">${tr("metrics_symmetric_title")}</p>
     <table class="metrics-table">
       <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
       <tbody>
         ${_singleMetricRow(
           "Δ Zeichen",
           fmt(comparison.delta_char),
-          "Normalisierte Levenshtein-Distanz auf Zeichenbasis (0 = identisch, 1 = komplett verschieden). Nicht CER — beide Seiten sind Hypothesen.",
+          tr("metrics_tooltip_sym_char"),
         )}
         ${_singleMetricRow(
           "Δ Wörter",
           fmt(comparison.delta_word),
-          "Normalisierte Levenshtein-Distanz auf Wortbasis. Nicht WER — beide Seiten sind Hypothesen.",
+          tr("metrics_tooltip_sym_word"),
         )}
         ${_singleMetricRow(
           "Token-Jaccard",
@@ -2117,19 +2153,19 @@ function _renderComparisonTab(comparison) {
         )}
       </tbody>
     </table>
-    <p class="metrics-section-title">Asymmetrisch (Andere ≙ Referenz)</p>
+    <p class="metrics-section-title">${tr("metrics_asymmetric_title", { name: "Other" })}</p>
     <table class="metrics-table">
       <thead><tr><th>Metrik</th><th>Wir vs Andere</th></tr></thead>
       <tbody>
         ${_singleMetricRow(
           "Token-Precision",
           fmtPct(comparison.token_precision),
-          "Anteil unserer Tokens, die auch die andere Engine liefert (Anti-Halluzination).",
+          tr("metrics_tooltip_precision"),
         )}
         ${_singleMetricRow(
           "Token-Recall",
           fmtPct(comparison.token_recall),
-          "Anteil der Tokens der anderen Engine, die wir auch produzieren (Coverage).",
+          tr("metrics_tooltip_recall"),
         )}
         ${_singleMetricRow("Token-F1", fmtPct(comparison.token_f1))}
       </tbody>
@@ -2149,7 +2185,7 @@ function _singleMetricRow(label, value, tooltip) {
 
 function _renderReferenceTab(reference) {
   if (!reference) {
-    return `<p class="compare-reference-hint">Kein Referenztext geliefert. Im Bereich „Referenztext" oben einfügen oder eine .txt hochladen.</p>`;
+    return `<p class="compare-reference-hint">${tr("metrics_no_reference")}</p>`;
   }
   const ours = reference.ours || {};
   const theirs = reference.theirs;  // null wenn kein Compare-Lauf erfolgte
@@ -2161,20 +2197,20 @@ function _renderReferenceTab(reference) {
     : `<thead><tr><th>Metrik</th><th>Wir</th></tr></thead>`;
   const row = (label, oursValue, theirsValue, opts) =>
     showTheirs ? _metricRow(label, oursValue, theirsValue, opts) : _singleMetricRow(label, oursValue, opts?.tooltip);
-  const t = theirs || {};
+  const theirsRef = theirs || {};
   const rows = [
-    row("CER", fmt(ours.cer), fmt(t.cer), {
-      tooltip: "Character Error Rate: Levenshtein(Referenz, Hypothese) / |Referenz|. Niedriger = besser.",
+    row("CER", fmt(ours.cer), fmt(theirsRef.cer), {
+      tooltip: tr("metrics_tooltip_cer"),
     }),
-    row("WER", fmt(ours.wer), fmt(t.wer), {
-      tooltip: "Word Error Rate: Levenshtein auf Wortbasis / |Referenz-Wörter|. Niedriger = besser.",
+    row("WER", fmt(ours.wer), fmt(theirsRef.wer), {
+      tooltip: tr("metrics_tooltip_wer"),
     }),
-    row("Token-Precision", fmtPct(ours.token_precision), fmtPct(t.token_precision)),
-    row("Token-Recall", fmtPct(ours.token_recall), fmtPct(t.token_recall)),
-    row("Token-F1", fmtPct(ours.token_f1), fmtPct(t.token_f1)),
+    row("Token-Precision", fmtPct(ours.token_precision), fmtPct(theirsRef.token_precision)),
+    row("Token-Recall", fmtPct(ours.token_recall), fmtPct(theirsRef.token_recall)),
+    row("Token-F1", fmtPct(ours.token_f1), fmtPct(theirsRef.token_f1)),
   ];
   return `
-    <p class="metrics-section-title">Referenz: ${reference.token_count ?? "?"} Tokens, ${reference.char_count ?? "?"} Zeichen</p>
+    <p class="metrics-section-title">${tr("metrics_reference_title", { tokens: reference.token_count ?? "?", chars: reference.char_count ?? "?" })}</p>
     <table class="metrics-table">
       ${tHead}
       <tbody>${rows.join("")}</tbody>
@@ -2209,9 +2245,9 @@ function renderMetricsPanel(metrics) {
       btn.setAttribute("title", disabledTitle || "");
     }
   };
-  setTabState("intrinsic", !!metrics.intrinsic, "Erfordert Vergleichslauf");
-  setTabState("comparison", !!metrics.comparison, "Erfordert Vergleichslauf");
-  setTabState("reference", !!metrics.reference, "Erfordert Referenztext");
+  setTabState("intrinsic", !!metrics.intrinsic, tr("metrics_tab_requires_compare"));
+  setTabState("comparison", !!metrics.comparison, tr("metrics_tab_requires_compare"));
+  setTabState("reference", !!metrics.reference, tr("metrics_tab_requires_reference"));
 
   const enabledOrder = ["intrinsic", "comparison", "reference"].filter((name) => {
     const btn = metricsTabBtns.find((b) => b.dataset.metricsTab === name);
@@ -2361,7 +2397,7 @@ async function runOCR() {
       activeRequestController = null;
     }
     setLoading(false);
-    metaEl.textContent = "Datei auswählen, um OCR zu starten.";
+    metaEl.textContent = tr("meta_pick_file");
     clearOutput();
     setWorkspaceVisible(false);
     return;
@@ -2376,7 +2412,7 @@ async function runOCR() {
   setLoading(true);
   clearOutput();
   setWorkspaceVisible(true);
-  metaEl.textContent = "OCR wird ausgeführt...";
+  metaEl.textContent = tr("meta_running");
 
   try {
     const requestMode = String(payload.get("mode") || "plain");
@@ -2401,7 +2437,7 @@ async function runOCR() {
     if (error.name === "AbortError") {
       return;
     }
-    metaEl.textContent = `Fehler: ${error.message}`;
+    metaEl.textContent = tr("meta_error", { message: error.message });
   } finally {
     if (activeRequestController === controller) {
       activeRequestController = null;
@@ -2565,12 +2601,12 @@ previewImageEl.addEventListener("error", () => {
   previewImageEl.classList.add("hidden");
   previewImageEl.removeAttribute("src");
   previewEmptyEl.textContent = isTiffLikeFile(file)
-    ? "TIFF-Vorschau wird vom Browser nicht zuverlässig unterstützt. OCR läuft trotzdem."
-    : `Vorschau für "${file?.type || file?.name || "unbekannt"}" konnte nicht geladen werden.`;
+    ? tr("preview_tiff_unsupported")
+    : tr("preview_failed", { name: file?.type || file?.name || "?" });
   previewEmptyEl.classList.remove("hidden");
   if (previewUrl) {
     previewPdfLinkEl.href = previewUrl;
-    previewPdfLinkEl.textContent = "Datei in neuem Tab öffnen";
+    previewPdfLinkEl.textContent = tr("open_file_new_tab");
     previewPdfLinkEl.classList.remove("hidden");
   }
 });
@@ -2728,8 +2764,8 @@ function _populateModelSuggestions(models) {
   if (modelHintEl) {
     const providerId = inferenceProviderEl?.value?.trim() || _defaultInferenceProvider;
     modelHintEl.textContent = models.length
-      ? `${models.length} Vision-Modelle (${providerId}). Qualifiziert: provider/model.`
-      : `Keine Modelle von ${providerId} geladen — Namen manuell eingeben.`;
+      ? tr("models_vision_hint", { count: models.length, provider: providerId })
+      : tr("models_vision_empty", { provider: providerId });
   }
 }
 
@@ -2777,7 +2813,7 @@ function _populateModelSelect(selectEl, models, preferred) {
   if (models.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "Keine Modelle verfügbar";
+    opt.textContent = tr("models_none");
     opt.disabled = true;
     selectEl.appendChild(opt);
     return;
@@ -2819,7 +2855,7 @@ async function _refreshPeerModels() {
   if (_peerModelsAbortController) _peerModelsAbortController.abort();
   _peerModelsAbortController = new AbortController();
   if (peerModelHintEl) {
-    peerModelHintEl.textContent = "Modelle werden geladen…";
+    peerModelHintEl.textContent = tr("peer_models_loading");
     peerModelHintEl.classList.remove("hidden");
   }
   try {
@@ -2835,7 +2871,7 @@ async function _refreshPeerModels() {
     peerModelSelectEl?.classList.remove("hidden");
     peerModelInputEl?.classList.add("hidden");
     if (peerModelHintEl) {
-      peerModelHintEl.textContent = `${models.length} Modelle vom Peer geladen.`;
+      peerModelHintEl.textContent = tr("peer_models_loaded", { count: models.length });
       peerModelHintEl.classList.remove("hidden");
     }
   } catch (err) {
@@ -2843,7 +2879,7 @@ async function _refreshPeerModels() {
     peerModelSelectEl?.classList.add("hidden");
     peerModelInputEl?.classList.remove("hidden");
     if (peerModelHintEl) {
-      peerModelHintEl.textContent = "Peer-Modellliste nicht erreichbar — Modellnamen frei eingeben.";
+      peerModelHintEl.textContent = tr("peer_models_unreachable");
       peerModelHintEl.classList.remove("hidden");
     }
   }
@@ -2870,11 +2906,11 @@ function _appendEngineConfig(fd, engineName) {
   } else if (engineName === "local_models") {
     const our = ourModelSelectEl?.value?.trim() || "";
     const their = theirModelSelectEl?.value?.trim() || "";
-    if (!our || !their) return "Bitte beide Modelle auswählen.";
+    if (!our || !their) return tr("pick_both_models");
     fd.append("our_model", our);
     fd.append("their_model", their);
   } else if (engineName === "self_peer") {
-    if (!get("peer-base-url")) return "Peer-URL fehlt.";
+    if (!get("peer-base-url")) return tr("peer_url_missing");
     fd.append("peer_base_url", get("peer-base-url"));
     if (get("peer-backend")) fd.append("peer_backend", get("peer-backend"));
     const peerModel = peerModelSelectEl && !peerModelSelectEl.classList.contains("hidden")
@@ -2903,7 +2939,7 @@ compareFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = currentFile();
   if (!file) {
-    compareSummaryEl.textContent = "Kein Bild geladen.";
+    compareSummaryEl.textContent = tr("compare_no_image");
     compareSummaryEl.classList.remove("hidden");
     return;
   }
@@ -2919,7 +2955,7 @@ compareFormEl.addEventListener("submit", async (event) => {
     return;
   }
 
-  compareSummaryEl.textContent = "Vergleich läuft…";
+  compareSummaryEl.textContent = tr("compare_running");
   compareSummaryEl.classList.remove("hidden");
   lastDiff = null;
   lastMetrics = null;
@@ -2974,13 +3010,13 @@ compareFormEl.addEventListener("submit", async (event) => {
     const resp = await fetch(compareEndpoint, { method: "POST", body: fd });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      compareSummaryEl.textContent = `Fehler: ${err.detail || resp.statusText}`;
+      compareSummaryEl.textContent = tr("error_http", { detail: err.detail || resp.statusText });
       return;
     }
     const data = await resp.json();
     applyCompareResponse(data);
   } catch (err) {
-    compareSummaryEl.textContent = `Netzwerkfehler: ${err.message}`;
+    compareSummaryEl.textContent = tr("network_error", { message: err.message });
   } finally {
     setLoading(false);
   }
@@ -3052,7 +3088,7 @@ async function runExample(slot) {
       try {
         await _loadExampleFile(slot);
       } catch (err) {
-        metaEl.textContent = `Beispiel konnte nicht geladen werden: ${err.message}`;
+        metaEl.textContent = tr("example_load_failed", { message: err.message });
         return;
       }
       applyOcrResponse(cached.ocr_response, {
@@ -3073,7 +3109,7 @@ async function runExample(slot) {
   try {
     await _loadExampleFile(slot);
   } catch (err) {
-    metaEl.textContent = `Beispiel konnte nicht geladen werden: ${err.message}`;
+    metaEl.textContent = tr("example_load_failed", { message: err.message });
     return;
   }
   await runOCR();
@@ -3091,6 +3127,21 @@ document.querySelectorAll("button[data-example-slot]").forEach((btn) => {
     }
   });
 });
+
+function refreshUiOnLocaleChange() {
+  window.docreadApplyI18n?.();
+  if (advancedToggleEl) {
+    setAdvancedOpen(advancedToggleEl.getAttribute("aria-expanded") === "true");
+  }
+  if (lastResponse && lastOcrApplyContext) {
+    applyOcrResponse(lastResponse, lastOcrApplyContext);
+  }
+  if (lastCompareResponse) {
+    applyCompareResponse(lastCompareResponse);
+  }
+}
+
+document.addEventListener("docread:locale-change", refreshUiOnLocaleChange);
 
 downloadCsvBtn.addEventListener("click", () => {
   if (lastTableMatrices.length > 0) {

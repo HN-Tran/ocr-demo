@@ -52,6 +52,7 @@ def _settings(*, app_base_path: str = "") -> Settings:
         deskew_min_angle_deg=0.5,
         host="127.0.0.1",
         port=8000,
+        app_locale="en",
     )
 
 

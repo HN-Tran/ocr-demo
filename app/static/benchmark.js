@@ -1,5 +1,8 @@
 "use strict";
 
+const tr = (key, params) =>
+  typeof window.docreadT === "function" ? window.docreadT(key, params) : key;
+
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const fileEl = document.getElementById("bench-files");
 const fileListEl = document.getElementById("bench-file-list");
@@ -63,7 +66,7 @@ async function loadModels() {
     const data = await resp.json();
     const models = Array.isArray(data?.models) ? data.models : [];
     if (models.length === 0) {
-      modelsEl.innerHTML = `<p class="bench-empty">Keine Vision-Modelle in Ollama gefunden.</p>`;
+      modelsEl.innerHTML = `<p class="bench-empty">${escapeHtml(tr("bench_models_none"))}</p>`;
       return;
     }
     modelsEl.innerHTML = models
@@ -71,39 +74,41 @@ async function loadModels() {
         (m) =>
           `<div class="bench-model-row">
             <span class="bench-model-name">${escapeHtml(m)}</span>
-            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::expert" /> Layout</label>
-            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::direct" /> Plain</label>
+            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::expert" /> ${escapeHtml(tr("bench_layout"))}</label>
+            <label><input type="checkbox" name="model" value="${escapeHtml(m)}::direct" /> ${escapeHtml(tr("bench_plain"))}</label>
           </div>`,
       )
       .join("");
   } catch (err) {
-    modelsEl.innerHTML = `<p class="bench-empty">Modellliste konnte nicht geladen werden: ${escapeHtml(err.message)}</p>`;
+    modelsEl.innerHTML = `<p class="bench-empty">${escapeHtml(tr("bench_models_load_error", { message: err.message }))}</p>`;
   }
 }
 
 fileEl.addEventListener("change", () => addFiles(fileEl.files || []));
 
-const DROP_HINT = `<p class="bench-drop-hint">Bilder, PDFs, Word- oder ZIP-Dateien hier ablegen oder <label for="bench-files" class="bench-drop-label">auswählen</label></p>`;
+function dropHintHtml() {
+  return `<p class="bench-drop-hint">${escapeHtml(tr("bench_drop_hint"))} <label for="bench-files" class="bench-drop-label">${escapeHtml(tr("bench_drop_choose"))}</label></p>`;
+}
 
 function isZipFile(f) {
   return f.type === "application/zip" || f.name.toLowerCase().endsWith(".zip");
 }
 
 function renderFileList() {
-  const hint = pickedFiles.length ? "" : DROP_HINT;
+  const hint = pickedFiles.length ? "" : dropHintHtml();
   const rows = pickedFiles
     .map((f, i) => {
       if (isZipFile(f)) {
         const entries = zipContents.get(f.name);
         let treeHtml;
         if (!entries) {
-          treeHtml = `<span class="bench-zip-note">Wird analysiert…</span>`;
+          treeHtml = `<span class="bench-zip-note">${escapeHtml(tr("bench_zip_analyzing"))}</span>`;
         } else if (entries.length === 0) {
-          treeHtml = `<span class="bench-zip-note">Keine unterstützten Dateien gefunden</span>`;
+          treeHtml = `<span class="bench-zip-note">${escapeHtml(tr("bench_zip_empty"))}</span>`;
         } else {
           treeHtml = `<ul class="bench-zip-tree">${entries.map((e, ei) => {
             const isLast = ei === entries.length - 1;
-            const icon = e.has_reference ? `<span class="bench-zip-ref-icon" title="Referenztext vorhanden">✓</span>` : "";
+            const icon = e.has_reference ? `<span class="bench-zip-ref-icon" title="${escapeHtml(tr("bench_ref_present"))}">✓</span>` : "";
             return `<li class="${isLast ? "last" : ""}">${escapeHtml(e.name)}${icon}</li>`;
           }).join("")}</ul>`;
         }
@@ -111,14 +116,14 @@ function renderFileList() {
         <div class="bench-file-row bench-file-row-zip" data-file-index="${i}">
           <div class="bench-file-name">${escapeHtml(f.name)} <span class="bench-zip-badge">ZIP</span></div>
           <div>${treeHtml}</div>
-          <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
+          <button type="button" class="bench-file-delete" data-delete-index="${i}" title="${escapeHtml(tr("bench_remove"))}">✕</button>
         </div>`;
       }
       return `
       <div class="bench-file-row" data-file-index="${i}">
         <div class="bench-file-name">${escapeHtml(f.name)}</div>
-        <textarea data-ref-index="${i}" placeholder="Optionaler Referenztext für CER/WER…"></textarea>
-        <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
+        <textarea data-ref-index="${i}" placeholder="${escapeHtml(tr("bench_ref_placeholder"))}"></textarea>
+          <button type="button" class="bench-file-delete" data-delete-index="${i}" title="${escapeHtml(tr("bench_remove"))}">✕</button>
       </div>`;
     })
     .join("");
@@ -206,7 +211,7 @@ stopBtn?.addEventListener("click", async () => {
 
 startBtn.addEventListener("click", async () => {
   if (pickedFiles.length === 0) {
-    statusEl.textContent = "Erst Dateien wählen.";
+    statusEl.textContent = tr("bench_pick_files");
     statusEl.classList.remove("hidden");
     return;
   }
@@ -217,7 +222,7 @@ startBtn.addEventListener("click", async () => {
     document.querySelectorAll('input[name="engine"]:checked'),
   ).map((el) => el.value);
   if (models.length + engines.length === 0) {
-    statusEl.textContent = "Mindestens ein Modell oder eine Engine wählen.";
+    statusEl.textContent = tr("bench_pick_runner");
     statusEl.classList.remove("hidden");
     return;
   }
@@ -244,7 +249,7 @@ startBtn.addEventListener("click", async () => {
   Object.entries(config).forEach(([k, v]) => v && fd.append(k, v));
 
   startBtn.disabled = true;
-  statusEl.textContent = "Job wird angelegt…";
+  statusEl.textContent = tr("bench_job_creating");
   statusEl.classList.remove("hidden");
 
   try {
@@ -262,7 +267,7 @@ startBtn.addEventListener("click", async () => {
     tableBodyEl.innerHTML = "";
     startPolling();
   } catch (err) {
-    statusEl.textContent = `Fehler: ${err.message}`;
+    statusEl.textContent = tr("meta_error", { message: err.message });
   } finally {
     startBtn.disabled = false;
   }
@@ -406,5 +411,14 @@ function renderJob(job) {
       </div>`)
     .join("");
 }
+
+function refreshBenchOnLocaleChange() {
+  window.docreadApplyI18n?.();
+  void loadModels();
+  renderFileList();
+  if (_lastJob) renderJob(_lastJob);
+}
+
+document.addEventListener("docread:locale-change", refreshBenchOnLocaleChange);
 
 void loadModels();

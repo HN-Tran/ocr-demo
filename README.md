@@ -34,7 +34,7 @@ Optional environment variables:
 export INFERENCE_PROVIDER="ollama"              # ollama | openai_compatible
 export INFERENCE_BASE_URL="http://localhost:11434"
 export INFERENCE_MODEL="glm-ocr:latest"
-# OpenAI-compatible example (vLLM / llama.cpp server):
+# OpenAI-compatible example (vLLM / llama.cpp server); GLM-OCR via Docker: docs/llamacpp-docker-glm-ocr.md
 # export INFERENCE_PROVIDER="openai_compatible"
 # export INFERENCE_BASE_URL="http://localhost:8000/v1"
 # export INFERENCE_MODEL="your-vision-model"
@@ -442,13 +442,18 @@ Notes:
 
 ## Docker (isolated execution and testing)
 
-Build and start app + Ollama:
+Build and start the app:
 
 ```bash
+cp .env.example .env   # optional: set INFERENCE_* / OLLAMA_* for your LLM backend
 docker compose up --build
 ```
 
 Open: `http://127.0.0.1:8000`
+
+UI language defaults to English (`APP_LOCALE=en`). Use the **EN / DE** toggle next to the theme control, or set `APP_LOCALE=de` in `.env`. Preference is stored in a cookie and `localStorage`.
+
+Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`. For **llama.cpp GLM-OCR in Docker** together with docread, use `docker-compose.stack.yml` (see [`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)).
 
 GPU notes:
 

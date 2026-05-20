@@ -1,6 +1,8 @@
 import json
 import os
 from dataclasses import dataclass
+
+from app.i18n import normalize_locale
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +145,7 @@ class Settings:
     deskew_min_angle_deg: float
     host: str
     port: int
+    app_locale: str
 
 
 def get_settings() -> Settings:
@@ -242,4 +245,5 @@ def get_settings() -> Settings:
         max_image_dim=_env_int("MAX_IMAGE_DIM", 3600),
         host=os.getenv("HOST", "127.0.0.1"),
         port=_env_int("PORT", 8000),
+        app_locale=normalize_locale(os.getenv("APP_LOCALE", "en")),
     )

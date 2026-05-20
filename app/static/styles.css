@@ -131,16 +131,28 @@ h3 {
 .heading-row {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 0.8rem;
-  align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 0.85rem;
+}
+
+.heading-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+  max-width: 100%;
 }
 
 .header-actions {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
-  margin-left: auto;
 }
 
 .page.has-workspace .header-actions {
@@ -166,6 +178,13 @@ h3 {
   border-color: var(--accent);
 }
 
+.header-toggles {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.locale-toggle,
 .theme-toggle {
   display: inline-flex;
   gap: 0.2rem;
@@ -173,6 +192,29 @@ h3 {
   border: 1px solid color-mix(in srgb, var(--line) 62%, var(--accent) 38%);
   background: color-mix(in srgb, var(--panel) 84%, var(--accent) 16%);
   padding: 0.2rem;
+}
+
+.locale-option {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  min-width: 2.2rem;
+  padding: 0.34rem 0.45rem;
+  font-weight: 700;
+  font-size: 0.78rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.locale-option[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.locale-option[aria-pressed="false"]:hover {
+  background: color-mix(in srgb, var(--panel) 55%, var(--accent) 45%);
+  color: var(--ink);
 }
 
 .theme-option {

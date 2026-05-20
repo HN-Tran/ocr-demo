@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ app_locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OCR-Demo · Benchmark</title>
+    <title data-i18n="bench_title">docread · Benchmark</title>
     <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
     <link rel="stylesheet" href="{{ app_base_path }}/static/benchmark.css?v={{ static_version }}" />
     <script>
@@ -18,36 +18,52 @@
     <main class="bench-page">
       <header class="bench-head">
         <div>
-          <h1>Batch-Benchmark</h1>
-          <p class="sub">N Dateien × M Runner. CER/WER/F1 wenn Referenztexte mitgegeben werden.</p>
+          <h1 data-i18n="bench_title">docread · Benchmark</h1>
+          <p class="sub" data-i18n="bench_subtitle">N files × M runners. CER/WER/F1 when reference texts are provided.</p>
         </div>
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <div class="theme-toggle" role="group" aria-label="Farbmodus">
-            <button id="theme-light-btn" class="theme-option" type="button" aria-label="Heller Modus" title="Heller Modus" aria-pressed="true">
+        <div class="heading-end">
+          <div class="locale-toggle" role="group" data-i18n-aria-label="aria_language" aria-label="Language">
+            <button
+              id="locale-en-btn"
+              class="locale-option"
+              type="button"
+              aria-pressed="{{ 'true' if app_locale == 'en' else 'false' }}"
+              title="English"
+            >EN</button>
+            <button
+              id="locale-de-btn"
+              class="locale-option"
+              type="button"
+              aria-pressed="{{ 'true' if app_locale == 'de' else 'false' }}"
+              title="Deutsch"
+            >DE</button>
+          </div>
+          <div class="theme-toggle" role="group" data-i18n-aria-label="aria_color_mode" aria-label="Color mode">
+            <button id="theme-light-btn" class="theme-option" type="button" data-i18n-aria-label="aria_light_mode" data-i18n-title="aria_light_mode" aria-label="Light mode" title="Light mode" aria-pressed="true">
               <span class="theme-icon" aria-hidden="true">☀</span>
             </button>
-            <button id="theme-dark-btn" class="theme-option" type="button" aria-label="Dunkler Modus" title="Dunkler Modus" aria-pressed="false">
+            <button id="theme-dark-btn" class="theme-option" type="button" data-i18n-aria-label="aria_dark_mode" data-i18n-title="aria_dark_mode" aria-label="Dark mode" title="Dark mode" aria-pressed="false">
               <span class="theme-icon" aria-hidden="true">☾</span>
             </button>
           </div>
-          <a class="api-docs-link" href="{{ app_base_path }}/">← Zurück zur App</a>
+          <a class="api-docs-link" href="{{ app_base_path }}/" data-i18n="bench_back">← Back to app</a>
         </div>
       </header>
 
       <section class="bench-config">
-        <h2>1. Dateien</h2>
+        <h2 data-i18n="bench_step_files">1. Files</h2>
         <input type="file" id="bench-files" multiple
                accept="image/png,image/jpeg,image/webp,image/gif,image/tiff,.tif,.tiff,application/pdf,.doc,.docx,application/zip,.zip" />
         <div id="bench-file-list" class="bench-file-list bench-drop-zone"></div>
 
-        <h2>2. Runner</h2>
+        <h2 data-i18n="bench_step_runners">2. Runners</h2>
         <div class="bench-runners">
           <fieldset>
-            <legend>Lokale Modelle (Ollama)</legend>
+            <legend data-i18n="bench_runner_local">Local models (Ollama)</legend>
             <div id="bench-models" class="bench-checkbox-list"></div>
           </fieldset>
           <fieldset>
-            <legend>Externe Engines</legend>
+            <legend data-i18n="bench_runner_external">External engines</legend>
             <div id="bench-engines" class="bench-checkbox-list">
               {% if azure_preset_label %}
               <label>
@@ -69,34 +85,34 @@
               {% endfor %}
             </div>
             <details class="bench-engine-config">
-              <summary>Engine-Konfiguration (für ausgewählte Engines)</summary>
+              <summary data-i18n="bench_engine_config">Engine configuration (for selected engines)</summary>
               <div class="bench-engine-config-body">
-                <label>Azure-Endpunkt <input id="bench-azure-endpoint" type="url" /></label>
-                <label>Azure-Key <input id="bench-azure-key" type="password" /></label>
-                <label>Peer-URL <input id="bench-peer-base-url" type="url" /></label>
-                <label>Peer-Modell <input id="bench-peer-model" type="text" /></label>
-                <label>Google-Vision-API-Key <input id="bench-google-api-key" type="password" /></label>
-                <label>Plain-Text-URL <input id="bench-plain-text-url" type="url" /></label>
-                <label>Plain-Text-Feld <input id="bench-plain-text-field" type="text" placeholder="text" /></label>
+                <label>Azure endpoint <input id="bench-azure-endpoint" type="url" /></label>
+                <label>Azure key <input id="bench-azure-key" type="password" /></label>
+                <label>Peer URL <input id="bench-peer-base-url" type="url" /></label>
+                <label>Peer model <input id="bench-peer-model" type="text" /></label>
+                <label>Google Vision API key <input id="bench-google-api-key" type="password" /></label>
+                <label>Plain text URL <input id="bench-plain-text-url" type="url" /></label>
+                <label>Plain text field <input id="bench-plain-text-field" type="text" placeholder="text" /></label>
               </div>
             </details>
           </fieldset>
         </div>
 
         <div class="bench-actions">
-          <button type="button" id="bench-start" class="action-btn">Benchmark starten</button>
+          <button type="button" id="bench-start" class="action-btn" data-i18n="bench_start">Start benchmark</button>
           <span id="bench-status" class="bench-status-pill hidden"></span>
-          <button type="button" id="bench-stop" class="api-docs-link hidden">Stop</button>
+          <button type="button" id="bench-stop" class="api-docs-link hidden" data-i18n="bench_stop">Stop</button>
         </div>
       </section>
 
       <section id="bench-results" class="bench-results hidden">
         <div class="bench-results-head">
-          <h2>Ergebnisse</h2>
+          <h2 data-i18n="bench_results">Results</h2>
           <div>
-            <a id="bench-mlflow-link" href="#" class="api-docs-link hidden" target="_blank" rel="noopener">MLflow-Run öffnen</a>
-            <a id="bench-csv-link" href="#" class="api-docs-link" download>CSV herunterladen</a>
-            <button type="button" id="bench-cancel" class="api-docs-link">Schließen</button>
+            <a id="bench-mlflow-link" href="#" class="api-docs-link hidden" target="_blank" rel="noopener" data-i18n="bench_mlflow">Open MLflow run</a>
+            <a id="bench-csv-link" href="#" class="api-docs-link" download data-i18n="bench_csv">Download CSV</a>
+            <button type="button" id="bench-cancel" class="api-docs-link" data-i18n="bench_close">Close</button>
           </div>
         </div>
         <div id="bench-aggregate" class="bench-aggregate"></div>
@@ -104,16 +120,16 @@
           <table id="bench-table" class="bench-table">
             <thead>
               <tr>
-                <th>Datei</th>
-                <th>Runner</th>
-                <th>Status</th>
-                <th>Tokens</th>
-                <th>Zeichen</th>
-                <th>Latenz (ms)</th>
+                <th data-i18n="bench_col_file">File</th>
+                <th data-i18n="bench_col_runner">Runner</th>
+                <th data-i18n="bench_col_status">Status</th>
+                <th data-i18n="bench_col_tokens">Tokens</th>
+                <th data-i18n="bench_col_chars">Characters</th>
+                <th data-i18n="bench_col_latency">Latency (ms)</th>
                 <th>CER</th>
                 <th>WER</th>
                 <th>F1</th>
-                <th>Hinweise</th>
+                <th data-i18n="bench_col_notes">Notes</th>
                 <th></th>
               </tr>
             </thead>
@@ -122,6 +138,12 @@
         </div>
       </section>
     </main>
+    <script>
+      window.__UI_CATALOG = {{ ui_catalog_json | safe }};
+      window.__UI_LOCALE = {{ app_locale | tojson }};
+      window.__UI_MESSAGES = {{ ui_messages_json | safe }};
+    </script>
+    <script src="{{ app_base_path }}/static/i18n.js?v={{ static_version }}"></script>
     <script src="{{ app_base_path }}/static/benchmark.js?v={{ static_version }}"></script>
   </body>
 </html>

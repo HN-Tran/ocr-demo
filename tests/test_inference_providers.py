@@ -57,6 +57,7 @@ def _base_settings(**overrides: object) -> Settings:
         "deskew_min_angle_deg": 0.5,
         "host": "127.0.0.1",
         "port": 8000,
+        "app_locale": "en",
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
