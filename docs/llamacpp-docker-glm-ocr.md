@@ -12,8 +12,8 @@ The **`server-cuda` image is NVIDIA-only** and will not use a Radeon GPU.
 
 ```bash
 cd /path/to/docread
-# Arch: default group is "render". Ubuntu may need: export LLAMACPP_GROUP=video
 docker compose -f docker-compose.llamacpp.yml up llamacpp-vulkan
+# If /dev/dri permission denied: set DOCKER_GPU_GID in .env and uncomment group_add in docker-compose.llamacpp.yml
 ```
 
 **ROCm** (if you have ROCm 6.3+ / 7.x and `/dev/kfd` on the host, e.g. Ubuntu 24.04):
@@ -58,7 +58,7 @@ Optional env (`.env` in repo root or export):
 | `LLAMACPP_HF_REPO` | `ggml-org/GLM-OCR-GGUF` | Hugging Face repo (`:F16` for higher quality) |
 | `LLAMACPP_CTX` | `8192` | Context size |
 | `LLAMACPP_N_GPU_LAYERS` | `99` | Offload layers to GPU (CUDA / ROCm / Vulkan) |
-| `LLAMACPP_GROUP` | `render` | Supplemental group for GPU devices (`render` on Arch, `video` on some Ubuntu) |
+| `DOCKER_GPU_GID` | — | Optional numeric GID for `/dev/dri`; uncomment `group_add` in compose when needed |
 
 ## 2. Resolve model id
 
@@ -98,7 +98,7 @@ docker compose up --build
 **docread + llama.cpp both in Docker** (one command, shared network):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.stack.yml up --build
+docker compose -f docker-compose.stack.yml up --build
 ```
 
 Defaults: `INFERENCE_BASE_URL=http://llamacpp-vulkan:8080/v1`, model `GLM-OCR-Q8_0.gguf`. Confirm the model id with `curl` after the server is up; override in `.env` if needed.
@@ -139,7 +139,7 @@ GLM-OCR is trained for short prompts like `OCR`; docread uses its own longer tem
 
 - **503 / Loading model**: wait for first-time HF download; check `docker compose -f docker-compose.llamacpp.yml logs -f`.
 - **Radeon / 9070 XT**: do not use `llamacpp-cuda`; use `llamacpp-vulkan` or `llamacpp-rocm`.
-- **Permission denied on /dev/dri**: `sudo usermod -aG render,video $USER` and re-login; on Ubuntu try `LLAMACPP_GROUP=video`.
+- **Permission denied on /dev/dri**: set `DOCKER_GPU_GID` from `stat -c '%g' /dev/dri/renderD128`; ensure your user is in that group on the host (`groups`).
 - **CUDA image on AMD or CPU-only host**: use `llamacpp-vulkan`, `llamacpp-rocm`, or `--profile cpu`.
 - **Port 8080 busy**: set `LLAMACPP_PORT=8081` and use `http://127.0.0.1:8081/v1` in docread.
 - **Slow model list**: set `INFERENCE_VISION_MODELS` to your model id (see step 3).

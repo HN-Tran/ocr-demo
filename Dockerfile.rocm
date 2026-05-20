@@ -1,5 +1,7 @@
-# Default: slim image + CPU PyTorch (docker compose up --build).
-FROM python:3.12-slim AS base
+# AMD layout GPU — official ROCm PyTorch image (docker-compose.rocm.yml).
+# https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html
+ARG ROCM_PYTORCH_IMAGE=rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.9.1
+FROM ${ROCM_PYTORCH_IMAGE} AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -24,14 +26,6 @@ COPY eval ./eval
 COPY tests ./tests
 COPY data ./data
 
-
-FROM base AS runtime
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python -m pip install --no-cache-dir \
-      --index-url https://download.pytorch.org/whl/cpu \
-      --extra-index-url https://pypi.org/simple \
-      torch torchvision
-ENV INSTALL_EXTRA=paddle
 RUN python3 /tmp/docker_install_app_deps.py
 
 RUN useradd -r -u 101 -m appuser && \
@@ -41,14 +35,3 @@ RUN useradd -r -u 101 -m appuser && \
 USER 101
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-
-FROM base AS test
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python -m pip install --no-cache-dir \
-      --index-url https://download.pytorch.org/whl/cpu \
-      --extra-index-url https://pypi.org/simple \
-      torch torchvision
-RUN python3 /tmp/docker_install_app_deps.py && \
-    python -m pip install --no-cache-dir pytest mypy ruff
-CMD ["pytest", "-q"]

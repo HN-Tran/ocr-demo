@@ -1,0 +1,26 @@
+# AMD layout GPU — builds Dockerfile.rocm (official rocm/pytorch base).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+#
+# Requires ROCm on the host (/dev/kfd). Layout uses torch device "cuda" (ROCm API).
+# If the app cannot open /dev/dri, set DOCKER_GPU_GID in .env (numeric GID from
+# stat -c '%g' /dev/dri/renderD128) and uncomment group_add below.
+# Some RDNA cards need HSA_OVERRIDE_GFX_VERSION=… in .env (see docs/docker-pytorch.md).
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+      target: runtime
+      args:
+        ROCM_PYTORCH_IMAGE: ${ROCM_PYTORCH_IMAGE:-rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.9.1}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    # group_add:
+    #   - "${DOCKER_GPU_GID}"
+    security_opt:
+      - seccomp=unconfined
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: ${HSA_OVERRIDE_GFX_VERSION:-}

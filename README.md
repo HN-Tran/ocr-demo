@@ -445,7 +445,6 @@ Notes:
 Build and start the app:
 
 ```bash
-cp .env.example .env   # optional: set INFERENCE_* / OLLAMA_* for your LLM backend
 docker compose up --build
 ```
 
@@ -453,7 +452,23 @@ Open: `http://127.0.0.1:8000`
 
 UI language defaults to English (`APP_LOCALE=en`). Use the **EN / DE** toggle next to the theme control, or set `APP_LOCALE=de` in `.env`. Preference is stored in a cookie and `localStorage`.
 
-Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`. For **llama.cpp GLM-OCR in Docker** together with docread, use `docker-compose.stack.yml` (see [`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)).
+Docker persists downloaded models in the `docread_model_cache` volume (`/home/appuser/.cache`). Default image uses **CPU** PyTorch (`Dockerfile`). GPU layout uses official base images (see [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
+
+```bash
+# NVIDIA — Dockerfile.cuda (pytorch/pytorch)
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+
+# AMD — Dockerfile.rocm (rocm/pytorch)
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+```
+
+GPU vision LLM uses **llama.cpp** ([`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)), not PyTorch Vulkan.
+
+Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`. For docread + bundled GLM-OCR:
+
+```bash
+docker compose -f docker-compose.stack.yml up --build
+```
 
 GPU notes:
 

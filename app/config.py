@@ -118,6 +118,7 @@ class Settings:
     ocr_backend: str
     ocr_expert_enable_layout: bool
     ocr_expert_layout_model: str
+    ocr_expert_layout_device: str
     ocr_expert_table_transformer: bool
     ocr_expert_per_region_ocr: bool
     ocr_expert_text_anchor: bool
@@ -216,6 +217,7 @@ def get_settings() -> Settings:
         ocr_expert_layout_model=os.getenv(
             "OCR_EXPERT_LAYOUT_MODEL", "PaddlePaddle/PP-DocLayoutV3_safetensors"
         ),
+        ocr_expert_layout_device=os.getenv("OCR_EXPERT_LAYOUT_DEVICE", "auto").strip().lower(),
         ocr_expert_table_transformer=_env_bool("OCR_EXPERT_TABLE_TRANSFORMER", False),
         ocr_expert_per_region_ocr=_env_bool("OCR_EXPERT_PER_REGION_OCR", True),
         ocr_expert_text_anchor=_env_bool("OCR_EXPERT_TEXT_ANCHOR", True),

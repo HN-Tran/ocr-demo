@@ -429,6 +429,7 @@ class DocumentPipeline:
         default_model: str,
         enable_layout: bool,
         layout_model: str,
+        layout_device: str = "auto",
         timeout_s: float,
         enable_table_transformer: bool = False,
         enable_per_region_ocr: bool = True,
@@ -443,6 +444,7 @@ class DocumentPipeline:
         self.default_model = default_model
         self.enable_layout = enable_layout
         self.layout_model = layout_model
+        self.layout_device = layout_device
         self.timeout_s = timeout_s
         self.enable_table_transformer = enable_table_transformer
         self.enable_per_region_ocr = enable_per_region_ocr
@@ -479,6 +481,7 @@ class DocumentPipeline:
                 layout_unclip_ratio=[1.0, 1.0],
                 layout_merge_bboxes_mode="large",
                 batch_size=8,
+                device=self.layout_device,
             )
             detector = HFLayoutDetector(config)
             detector.start()

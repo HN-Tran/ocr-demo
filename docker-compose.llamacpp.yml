@@ -46,8 +46,8 @@ services:
       - llamacpp_cache:/cache
     devices:
       - /dev/dri:/dev/dri
-    group_add:
-      - "${LLAMACPP_GROUP:-render}"
+    # group_add:
+    #   - "${DOCKER_GPU_GID}"
     command: *llamacpp-glm-ocr-command
     restart: unless-stopped
 
@@ -63,8 +63,8 @@ services:
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
-    group_add:
-      - "${LLAMACPP_GROUP:-render}"
+    # group_add:
+    #   - "${DOCKER_GPU_GID}"
     security_opt:
       - seccomp=unconfined
     command: *llamacpp-glm-ocr-command

@@ -93,6 +93,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         default_model=settings.inference_model,
         enable_layout=settings.ocr_expert_enable_layout,
         layout_model=settings.ocr_expert_layout_model,
+        layout_device=settings.ocr_expert_layout_device,
         timeout_s=settings.request_timeout_s,
         enable_table_transformer=settings.ocr_expert_table_transformer,
         enable_per_region_ocr=settings.ocr_expert_per_region_ocr,

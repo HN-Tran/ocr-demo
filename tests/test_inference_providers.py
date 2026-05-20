@@ -30,6 +30,7 @@ def _base_settings(**overrides: object) -> Settings:
         "ocr_backend": "direct",
         "ocr_expert_enable_layout": True,
         "ocr_expert_layout_model": "layout",
+        "ocr_expert_layout_device": "auto",
         "ocr_expert_table_transformer": False,
         "ocr_expert_per_region_ocr": True,
         "ocr_expert_text_anchor": True,

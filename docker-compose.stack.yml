@@ -1,11 +1,12 @@
 # docread + llama.cpp GLM-OCR on one network (no host uv/ollama required).
 #
-#   docker compose -f docker-compose.yml -f docker-compose.stack.yml up --build
+#   docker compose -f docker-compose.stack.yml up --build
 #
-# Uses llamacpp-vulkan by default (AMD-friendly). Override the service name in
-# INFERENCE_BASE_URL if you start llamacpp-rocm / llamacpp-cuda instead.
+# Uses llamacpp-vulkan by default (AMD-friendly). Override INFERENCE_BASE_URL
+# if you switch to llamacpp-rocm / llamacpp-cuda (see docs/llamacpp-docker-glm-ocr.md).
 
 include:
+  - docker-compose.yml
   - docker-compose.llamacpp.yml
 
 services:
