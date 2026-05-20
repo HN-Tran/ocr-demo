@@ -8,8 +8,8 @@ from pathlib import Path
 from statistics import mean
 
 from app.config import get_settings
+from app.services.inference import create_vision_registry
 from app.services.ocr_pipeline import OCRPipeline
-from app.services.ollama_client import OllamaClient
 from eval.metrics import cer, field_accuracy, wer
 
 
@@ -67,11 +67,8 @@ async def _run_sample(pipeline: OCRPipeline, sample: dict, samples_dir: Path) ->
 async def run_eval(manifest: Path, samples_dir: Path, reports_dir: Path) -> Path:
     settings = get_settings()
     pipeline = OCRPipeline(
-        ollama_client=OllamaClient(
-            base_url=settings.ollama_base_url,
-            timeout_s=settings.request_timeout_s,
-        ),
-        default_model=settings.ollama_model,
+        vision_registry=create_vision_registry(settings),
+        default_model=settings.inference_model,
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
     )

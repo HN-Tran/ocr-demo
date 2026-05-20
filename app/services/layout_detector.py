@@ -18,6 +18,27 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 
+def resolve_layout_device(requested: str | None) -> str:
+    """Map ``auto`` / ``cpu`` / ``cuda`` / ``cuda:N`` to a torch device string."""
+    raw = (requested or "auto").strip().lower()
+    if raw in {"", "auto"}:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if raw == "cpu":
+        return "cpu"
+    if raw in {"cuda", "gpu", "rocm", "amd"}:
+        if not torch.cuda.is_available():
+            logger.warning("Layout device %r requested but CUDA is unavailable; using CPU", raw)
+            return "cpu"
+        return "cuda"
+    if raw.startswith("cuda:"):
+        if not torch.cuda.is_available():
+            logger.warning("Layout device %r requested but CUDA is unavailable; using CPU", raw)
+            return "cpu"
+        return raw
+    logger.warning("Unknown layout device %r; falling back to auto", requested)
+    return resolve_layout_device("auto")
+
+
 # ------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------
@@ -36,6 +57,7 @@ class LayoutDetectorConfig:
     batch_size: int = 8
     label_task_mapping: dict[str, list[str]] | None = None
     id2label: dict[int, str] | None = None
+    device: str = "auto"
     cuda_visible_devices: str | None = None
     # Extra fields for forward-compat; ignored by the detector.
     extra: dict[str, Any] = field(default_factory=dict)
@@ -306,6 +328,7 @@ class HFLayoutDetector:
 
     def __init__(self, config: LayoutDetectorConfig) -> None:
         self.model_dir = config.model_dir
+        self.layout_device = config.device
         self.cuda_visible_devices = config.cuda_visible_devices
 
         self.threshold = config.threshold
@@ -336,14 +359,14 @@ class HFLayoutDetector:
         self._model = AutoModelForObjectDetection.from_pretrained(self.model_dir)
         self._model.eval()
 
-        if torch.cuda.is_available():
-            self._device = (
-                f"cuda:{self.cuda_visible_devices}"
-                if self.cuda_visible_devices is not None
-                else "cuda"
-            )
+        if self.cuda_visible_devices is not None and self.layout_device in {
+            "auto",
+            "",
+        }:
+            legacy = f"cuda:{self.cuda_visible_devices}" if torch.cuda.is_available() else "cpu"
+            self._device = legacy
         else:
-            self._device = "cpu"
+            self._device = resolve_layout_device(self.layout_device)
         self._model = self._model.to(self._device)
 
         if self.id2label is None:

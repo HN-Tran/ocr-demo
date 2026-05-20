@@ -1,54 +1,82 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ app_locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OCR-Demo</title>
+    <title data-i18n="page_title">docread</title>
     <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
   </head>
-  <body data-base-path="{{ app_base_path }}" data-default-model="{{ default_model }}">
+  <body
+    data-base-path="{{ app_base_path }}"
+    data-default-model="{{ default_model }}"
+    data-default-inference-provider="{{ inference_provider }}"
+  >
     <main class="page">
       <section class="panel panel-input">
         <div class="heading-row">
           <div>
-            <h1>OCR-Demo</h1>
-            <p class="sub">Datei ablegen und Text in Sekunden extrahieren.</p>
+            <h1 data-i18n="page_title">docread</h1>
+            <p class="sub" data-i18n="page_subtitle">Drop a file and extract text in seconds.</p>
           </div>
+          <div class="heading-end">
           <div class="header-actions">
             <a
               class="api-docs-link"
               href="{{ app_base_path }}/benchmark"
-              title="Batch-Benchmark"
-            >Benchmark</a>
+              data-i18n-title="nav_benchmark_title"
+              title="Batch benchmark"
+            ><span data-i18n="nav_benchmark">Benchmark</span></a>
             <a
               class="api-docs-link"
               href="{{ app_base_path }}/docs"
               target="_blank"
               rel="noopener"
-              title="API-Dokumentation (Swagger UI)"
-            >Swagger</a>
+              data-i18n-title="nav_swagger_title"
+              title="API documentation (Swagger UI)"
+            ><span data-i18n="nav_swagger">Swagger</span></a>
             <a
               class="api-docs-link"
               href="{{ app_base_path }}/redoc"
               target="_blank"
               rel="noopener"
-              title="API-Dokumentation (ReDoc)"
-            >ReDoc</a>
+              data-i18n-title="nav_redoc_title"
+              title="API documentation (ReDoc)"
+            ><span data-i18n="nav_redoc">ReDoc</span></a>
             <a
               class="api-docs-link"
               href="{{ app_base_path }}/openapi.json"
               target="_blank"
               rel="noopener"
-              title="OpenAPI-Schema (JSON)"
-            >OpenAPI</a>
+              data-i18n-title="nav_openapi_title"
+              title="OpenAPI schema (JSON)"
+            ><span data-i18n="nav_openapi">OpenAPI</span></a>
           </div>
-          <div class="theme-toggle" role="group" aria-label="Farbmodus">
+          <div class="header-toggles">
+            <div class="locale-toggle" role="group" data-i18n-aria-label="aria_language" aria-label="Language">
+              <button
+                id="locale-en-btn"
+                class="locale-option"
+                type="button"
+                aria-pressed="{{ 'true' if app_locale == 'en' else 'false' }}"
+                title="English"
+              >EN</button>
+              <button
+                id="locale-de-btn"
+                class="locale-option"
+                type="button"
+                aria-pressed="{{ 'true' if app_locale == 'de' else 'false' }}"
+                title="Deutsch"
+              >DE</button>
+            </div>
+            <div class="theme-toggle" role="group" data-i18n-aria-label="aria_color_mode" aria-label="Color mode">
             <button
               id="theme-light-btn"
               class="theme-option"
               type="button"
-              aria-label="Heller Modus"
-              title="Heller Modus"
+              data-i18n-aria-label="aria_light_mode"
+              data-i18n-title="aria_light_mode"
+              aria-label="Light mode"
+              title="Light mode"
               aria-pressed="true"
             >
               <span class="theme-icon" aria-hidden="true">☀</span>
@@ -57,12 +85,16 @@
               id="theme-dark-btn"
               class="theme-option"
               type="button"
-              aria-label="Dunkler Modus"
-              title="Dunkler Modus"
+              data-i18n-aria-label="aria_dark_mode"
+              data-i18n-title="aria_dark_mode"
+              aria-label="Dark mode"
+              title="Dark mode"
               aria-pressed="false"
             >
               <span class="theme-icon" aria-hidden="true">☾</span>
             </button>
+            </div>
+          </div>
           </div>
         </div>
         <form id="ocr-form">
@@ -77,15 +109,15 @@
 
           <section id="onboarding-card" class="onboarding-card">
             <div class="onboarding-hero">
-              <button id="dropzone" class="dropzone" type="button">
-                Bilder, PDFs oder Word-Dokumente hier ablegen
+              <button id="dropzone" class="dropzone" type="button" data-i18n="onboarding_dropzone">
+                Drop images, PDFs, or Word documents here
               </button>
             </div>
             <div class="onboarding-actions">
-              <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
+              <button id="pick-file-btn" class="pick-file-btn" type="button" data-i18n="onboarding_pick_file">Choose file</button>
               {% if examples %}
               <div class="example-actions" id="example-actions">
-                <span class="example-actions-label">Beispiele:</span>
+                <span class="example-actions-label" data-i18n="onboarding_examples_label">Examples:</span>
                 {% for ex in examples %}
                 <button
                   type="button"
@@ -95,8 +127,8 @@
                 {% endfor %}
               </div>
               {% endif %}
-              <p class="onboarding-hint">
-                Unterstützt PNG, JPEG, WEBP, GIF, TIFF, mehrseitige PDFs, DOC und DOCX.
+              <p class="onboarding-hint" data-i18n="onboarding_hint">
+                Supports PNG, JPEG, WEBP, GIF, TIFF, multi-page PDFs, DOC, and DOCX.
               </p>
             </div>
           </section>
@@ -104,79 +136,80 @@
           <div id="preview-wrap" class="preview-wrap hidden">
             <div class="preview-head">
               <div>
-                <p class="preview-title">Vorschau</p>
-                <p class="preview-drop-hint">
-                  Zum Ersetzen Datei in das Browserfenster ziehen und loslassen.
+                <p class="preview-title" data-i18n="preview_title">Preview</p>
+                <p class="preview-drop-hint" data-i18n="preview_drop_hint">
+                  Drag a file into the browser window and release to replace.
                 </p>
               </div>
-              <button id="change-file-btn" class="change-file-btn" type="button">Datei ändern</button>
+              <button id="change-file-btn" class="change-file-btn" type="button" data-i18n="preview_change_file">Change file</button>
             </div>
             <div id="page-selector-wrap" class="page-selector-wrap hidden">
-              <label for="page-selector">Seite:</label>
+              <label for="page-selector"><span data-i18n="preview_page_label">Page:</span></label>
               <select id="page-selector"></select>
             </div>
             <div id="preview-zoom" class="preview-zoom hidden">
-              <button type="button" class="preview-zoom-step" id="preview-zoom-out" aria-label="Verkleinern">−</button>
+              <button type="button" class="preview-zoom-step" id="preview-zoom-out" data-i18n-aria-label="preview_zoom_out" aria-label="Zoom out">−</button>
               <input type="range" id="preview-zoom-slider" min="0.5" max="3" step="0.05" value="1" />
               <span id="preview-zoom-value" class="preview-zoom-value">100 %</span>
-              <button type="button" class="preview-zoom-step" id="preview-zoom-in" aria-label="Vergrößern">+</button>
-              <button type="button" class="preview-zoom-fit" id="preview-zoom-fit">Anpassen</button>
+              <button type="button" class="preview-zoom-step" id="preview-zoom-in" data-i18n-aria-label="preview_zoom_in" aria-label="Zoom in">+</button>
+              <button type="button" class="preview-zoom-fit" id="preview-zoom-fit" data-i18n="preview_zoom_fit">Fit</button>
             </div>
-            <div id="preview-empty" class="preview-empty">Keine Datei ausgewählt.</div>
+            <div id="preview-empty" class="preview-empty" data-i18n="preview_empty">No file selected.</div>
             <div id="preview-image-stage" class="preview-media preview-image-stage hidden">
               <div id="preview-image-frame" class="preview-image-frame">
-                <img id="preview-image" class="preview-image hidden" alt="Vorschau der ausgewählten Datei" />
+                <img id="preview-image" class="preview-image hidden" data-i18n-aria-label="preview_image_alt" alt="Preview of the selected file" />
                 <div id="preview-layout-overlay" class="preview-layout-overlay hidden"></div>
               </div>
             </div>
             <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
-            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer">PDF in neuem Tab öffnen</a>
+            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer" data-i18n="preview_pdf_link">Open PDF in new tab</a>
           </div>
 
           <div id="advanced-panel" class="advanced-panel is-collapsed">
             <label>
-              Modus
+              <span data-i18n="mode_label">Mode</span>
               <select id="mode" name="mode">
-                <option value="plain">Klartext</option>
-                <option value="structured">Strukturiertes JSON</option>
+                <option value="plain" data-i18n="mode_plain">Plain text</option>
+                <option value="structured" data-i18n="mode_structured">Structured JSON</option>
               </select>
             </label>
 
             <label id="task-wrap">
-              Aufgabe
+              <span data-i18n="task_label">Task</span>
               <select id="task" name="task">
-                <option value="ocr_text">OCR-Textextraktion</option>
-                <option value="describe_image">Bild beschreiben</option>
-                <option value="read_scene_text">Szenentext lesen</option>
-                <option value="extract_table_markdown">Tabelle</option>
-                <option value="summarize_document">Dokument zusammenfassen</option>
+                <option value="ocr_text" data-i18n="task_ocr_text">OCR text extraction</option>
+                <option value="describe_image" data-i18n="task_describe_image">Describe image</option>
+                <option value="read_scene_text" data-i18n="task_read_scene_text">Read scene text</option>
+                <option value="extract_table_markdown" data-i18n="task_extract_table">Table</option>
+                <option value="summarize_document" data-i18n="task_summarize">Summarize document</option>
               </select>
             </label>
 
             <label id="custom-prompt-wrap">
-              Eigener Prompt (optional)
+              <span data-i18n="custom_prompt_label">Custom prompt (optional)</span>
               <textarea
                 id="custom_prompt"
                 name="custom_prompt"
                 rows="4"
-                placeholder="Beschreibe dieses Bild in einem Absatz."
+                data-i18n-placeholder="custom_prompt_placeholder"
+                placeholder="Describe this image in one paragraph."
               ></textarea>
-              <span class="hint">Wenn gesetzt, überschreibt dies die gewählte Aufgaben-Vorgabe.</span>
+              <span class="hint" data-i18n="custom_prompt_hint">When set, overrides the selected task preset.</span>
             </label>
 
             <label id="schema-wrap" class="hidden">
-              Strukturiertes Schema
+              <span data-i18n="schema_label">Structured schema</span>
               <select id="schema_name" name="schema_name">
-                <option value="auto" selected>Automatisch erkennen</option>
-                <option value="invoice_basic">Rechnung</option>
-                <option value="receipt_basic">Beleg</option>
-                <option value="table_basic">Tabelle</option>
-                <option value="business_card_basic">Visitenkarte</option>
+                <option value="auto" selected data-i18n="schema_auto">Detect automatically</option>
+                <option value="invoice_basic" data-i18n="schema_invoice">Invoice</option>
+                <option value="receipt_basic" data-i18n="schema_receipt">Receipt</option>
+                <option value="table_basic" data-i18n="schema_table">Table</option>
+                <option value="business_card_basic" data-i18n="schema_business_card">Business card</option>
               </select>
             </label>
 
             <label>
-              Modus
+              <span data-i18n="backend_mode_label">Mode</span>
               <select id="backend" name="backend">
                 <option value="direct" {% if default_backend != "expert" %}selected{% endif %}>
                   Direct
@@ -185,41 +218,41 @@
                   Dev
                 </option>
               </select>
-              <span class="hint">
-                Dev nutzt Layout-Erkennung mit regionenbasierter OCR via Ollama, Direct nutzt den bestehenden Pfad.
+              <span class="hint" data-i18n="backend_hint">
+                Dev uses layout detection with region OCR via the vision LLM; Direct uses the legacy path.
               </span>
             </label>
 
             <label>
-              Dev: Layout
+              <span data-i18n="expert_layout_label">Dev: Layout</span>
               <select id="expert_enable_layout" name="expert_enable_layout">
                 <option value="" selected>
-                  Standard ({{ "An" if default_expert_enable_layout else "Aus" }})
+                  {{ ui.common_default }} ({{ ui.common_on if default_expert_enable_layout else ui.common_off }})
                 </option>
-                <option value="true">An</option>
-                <option value="false">Aus</option>
+                <option value="true" data-i18n="common_on">On</option>
+                <option value="false" data-i18n="common_off">Off</option>
               </select>
-              <span class="hint">
-                Überschreibt pro Anfrage das Layout-Flag (nur bei Modus Dev relevant).
+              <span class="hint" data-i18n="expert_layout_hint">
+                Overrides layout per request (Dev mode only).
               </span>
             </label>
 
             <label>
-              Dev: Layout-Modell
+              <span data-i18n="expert_layout_model_label">Dev: Layout model</span>
               <select id="expert_layout_model" name="expert_layout_model">
-                <option value="" selected>Standard ({{ default_expert_layout_model }})</option>
+                <option value="" selected>{{ ui.common_default }} ({{ default_expert_layout_model }})</option>
                 <option value="pascalrai/Deformable-DETR-Document-Layout-Analysis">Deformable DETR (DocLayNet, mAP 0.61)</option>
                 <option value="Aryn/deformable-detr-DocLayNet">Deformable DETR Aryn (DocLayNet)</option>
                 <option value="docling-project/docling-layout-heron">Docling Heron (RT-DETRv2)</option>
                 <option value="docling-project/docling-layout-heron-101">Docling Heron 101</option>
               </select>
-              <span class="hint">
-                Layout-Erkennungsmodell für Dev-Modus. Unterstützt alle HuggingFace-Modelle mit AutoModelForObjectDetection.
+              <span class="hint" data-i18n="expert_layout_model_hint">
+                Layout model for Dev mode. Supports Hugging Face object-detection models.
               </span>
             </label>
 
             <label>
-              Dev: Layout-Schwellenwert
+              <span data-i18n="expert_layout_threshold_label">Dev: Layout threshold</span>
               <input
                 id="expert_layout_threshold"
                 name="expert_layout_threshold"
@@ -229,59 +262,55 @@
                 step="0.05"
                 placeholder="0.2"
               />
-              <span class="hint">
-                Confidence-Schwellenwert für Layout-Erkennung (0–1). Niedrigere Werte erkennen mehr Regionen, höhere filtern unsichere Ergebnisse.
+              <span class="hint" data-i18n="expert_layout_threshold_hint">
+                Confidence threshold for layout (0–1). Lower finds more regions; higher filters uncertain ones.
               </span>
             </label>
 
             <label>
-              Dev: Table Transformer
+              <span data-i18n="expert_table_transformer_label">Dev: Table Transformer</span>
               <select id="expert_table_transformer" name="expert_table_transformer">
                 <option value="" selected>
-                  Standard ({{ "An" if default_expert_table_transformer else "Aus" }})
+                  {{ ui.common_default }} ({{ ui.common_on if default_expert_table_transformer else ui.common_off }})
                 </option>
-                <option value="true">An</option>
-                <option value="false">Aus</option>
+                <option value="true" data-i18n="common_on">On</option>
+                <option value="false" data-i18n="common_off">Off</option>
               </select>
-              <span class="hint">
-                Verwendet Microsoft Table Transformer für präzise Zell-Bounding-Boxes bei erkannten Tabellen (nur Dev-Modus).
+              <span class="hint" data-i18n="expert_table_transformer_hint">
+                Uses Microsoft Table Transformer for precise table cell boxes (Dev mode only).
               </span>
             </label>
 
             <label>
-              Dev: Regionen-OCR
+              <span data-i18n="expert_per_region_ocr_label">Dev: Region OCR</span>
               <select id="expert_per_region_ocr" name="expert_per_region_ocr">
                 <option value="" selected>
-                  Standard ({{ "An" if default_expert_per_region_ocr else "Aus" }})
+                  {{ ui.common_default }} ({{ ui.common_on if default_expert_per_region_ocr else ui.common_off }})
                 </option>
-                <option value="true">An</option>
-                <option value="false">Aus</option>
+                <option value="true" data-i18n="common_on">On</option>
+                <option value="false" data-i18n="common_off">Off</option>
               </select>
-              <span class="hint">
-                Führt für jede erkannte Layout-Region eine separate OCR durch und
-                gleicht das Ergebnis mit der Seiten-OCR ab. Ausschalten spart Zeit
-                und Speicher, liefert aber keine per-Region-Texte.
+              <span class="hint" data-i18n="expert_per_region_ocr_hint">
+                Runs OCR per layout region and aligns with page OCR. Off saves time but drops per-region text.
               </span>
             </label>
 
             <label>
-              Dev: Text-Anker
+              <span data-i18n="expert_text_anchor_label">Dev: Text anchor</span>
               <select id="expert_text_anchor" name="expert_text_anchor">
                 <option value="" selected>
-                  Standard ({{ "An" if default_expert_text_anchor else "Aus" }})
+                  {{ ui.common_default }} ({{ ui.common_on if default_expert_text_anchor else ui.common_off }})
                 </option>
-                <option value="true">An</option>
-                <option value="false">Aus</option>
+                <option value="true" data-i18n="common_on">On</option>
+                <option value="false" data-i18n="common_off">Off</option>
               </select>
-              <span class="hint">
-                Gleicht die per-Region-OCR mit der Seiten-OCR ab (Fuzzy-Match).
-                Aus: Region-Texte werden roh übernommen &mdash; hilfreich bei
-                Tabellen, bei denen der Abgleich fehlschlägt.
+              <span class="hint" data-i18n="expert_text_anchor_hint">
+                Fuzzy-match region OCR to page OCR. Off keeps raw region text (helps some tables).
               </span>
             </label>
 
             <label>
-              Dev: Text-Anker-Schwelle
+              <span data-i18n="expert_text_anchor_threshold_label">Dev: Text anchor threshold</span>
               <input
                 id="expert_text_anchor_threshold"
                 name="expert_text_anchor_threshold"
@@ -291,55 +320,64 @@
                 step="1"
                 placeholder="{{ default_expert_text_anchor_threshold }}"
               />
-              <span class="hint">
-                Mindest-Fuzzy-Score (0-100), ab dem der Anker übernommen wird.
-                Darunter: Rohtext der Region wird verwendet. Standard:
-                {{ default_expert_text_anchor_threshold }}.
+              <span class="hint" data-i18n="expert_text_anchor_threshold_hint" data-i18n-default="{{ default_expert_text_anchor_threshold }}">
+                Minimum fuzzy score (0–100) to adopt the anchor. Below that, raw region text is used. Default: {{ default_expert_text_anchor_threshold }}.
               </span>
             </label>
 
             <label>
-              Dev: Wort-Erkennung
+              <span data-i18n="expert_word_detector_label">Dev: Word detector</span>
               <select id="expert_word_detector" name="expert_word_detector">
                 <option value="" selected>
-                  Standard ({{ default_expert_word_detector or "Aus" }})
+                  {{ ui.common_default }} ({{ default_expert_word_detector or ui.common_off }})
                 </option>
-                <option value="none">Aus</option>
+                <option value="none" data-i18n="common_off">Off</option>
                 <option value="paddleocr">PaddleOCR</option>
                 <option value="doctr">DocTR</option>
               </select>
-              <span class="hint">
-                Optionaler Wort-Detektor für präzise Wort-Bounding-Boxes (PaddleOCR oder DocTR, nur Dev-Modus).
+              <span class="hint" data-i18n="expert_word_detector_hint">
+                Optional word detector for word boxes (PaddleOCR or DocTR, Dev mode only).
               </span>
             </label>
 
             <label>
-              Dev: Vergleich – Detektor-only-Wörter
+              <span data-i18n="expert_compare_include_detector_only_label">Dev: Compare — detector-only words</span>
               <select
                 id="expert_compare_include_detector_only"
                 name="expert_compare_include_detector_only"
               >
                 <option value="" selected>
-                  Standard ({{ "An" if default_expert_compare_include_detector_only else "Aus" }})
+                  {{ ui.common_default }} ({{ ui.common_on if default_expert_compare_include_detector_only else ui.common_off }})
                 </option>
-                <option value="true">An</option>
-                <option value="false">Aus</option>
+                <option value="true" data-i18n="common_on">On</option>
+                <option value="false" data-i18n="common_off">Off</option>
               </select>
-              <span class="hint">
-                Aus (Standard): Vergleich basiert nur auf Tokens der Roh-OCR.
-                An: zusätzlich werden DocTR-Boxen, die zu keinem Roh-OCR-Token
-                passen, mit DocTR-Text aufgenommen — kann doppelte/bogus-Tokens
-                an gleicher Position erzeugen, falls der Detektor Boxen splittet.
+              <span class="hint" data-i18n="expert_compare_include_detector_only_hint">
+                Off (default): compare uses raw OCR tokens only. On: adds DocTR boxes without a raw token (may duplicate).
               </span>
             </label>
 
             <label>
-              Modell
-              <input id="model" name="model" placeholder="{{ default_model }}" />
+              <span data-i18n="inference_provider_label">Inference provider</span>
+              <select id="inference_provider" name="inference_provider"></select>
+              <span class="hint" data-i18n="inference_provider_hint">Vision LLM backend for OCR (e.g. Ollama, vLLM, llama.cpp).</span>
             </label>
 
             <label>
-              Token-Limit
+              <span data-i18n="model_label">Model</span>
+              <input
+                id="model"
+                name="model"
+                list="model-suggestions"
+                placeholder="{{ default_model }}"
+                autocomplete="off"
+              />
+              <datalist id="model-suggestions"></datalist>
+              <span id="model-hint" class="hint"></span>
+            </label>
+
+            <label>
+              <span data-i18n="token_limit_label">Token limit</span>
               <input
                 id="token_limit"
                 name="token_limit"
@@ -352,7 +390,7 @@
             </label>
 
             <label>
-              GIF-Frames (optional)
+              <span data-i18n="gif_frames_label">GIF frames (optional)</span>
               <input
                 id="gif_max_frames"
                 name="gif_max_frames"
@@ -362,15 +400,15 @@
                 step="1"
                 placeholder="8"
               />
-              <span class="hint">Nur für animierte GIFs. Höher = mehr Abdeckung, langsamer.</span>
+              <span class="hint" data-i18n="gif_frames_hint">Animated GIFs only. Higher = more coverage, slower.</span>
             </label>
 
             <div class="advanced-apply-row">
-              <button id="apply-options-btn" class="secondary-action" type="button" disabled>
-                Änderungen übernehmen
+              <button id="apply-options-btn" class="secondary-action" type="button" disabled data-i18n="advanced_apply">
+                Apply changes
               </button>
-              <span id="advanced-dirty-hint" class="advanced-dirty-hint hidden">
-                Es gibt nicht angewendete Änderungen.
+              <span id="advanced-dirty-hint" class="advanced-dirty-hint hidden" data-i18n="advanced_dirty_hint">
+                Unapplied changes.
               </span>
             </div>
           </div>
@@ -381,8 +419,9 @@
               class="advanced-toggle"
               type="button"
               aria-expanded="false"
+              data-i18n="advanced_toggle"
             >
-              Expertenoptionen
+              Expert options
             </button>
           </div>
         </form>
@@ -390,15 +429,15 @@
 
       <section id="result-panel" class="panel result-panel hidden">
         <div class="result-header">
-          <h2>Extrahierter Text</h2>
+          <h2 data-i18n="result_title">Extracted text</h2>
           <div class="actions">
-            <button id="copy-btn" type="button">Text kopieren</button>
-            <button id="download-btn" type="button" class="hidden">JSON herunterladen</button>
-            <button id="download-csv-btn" type="button" class="hidden">CSV herunterladen</button>
+            <button id="copy-btn" type="button" data-i18n="result_copy">Copy text</button>
+            <button id="download-btn" type="button" class="hidden" data-i18n="result_download_json">Download JSON</button>
+            <button id="download-csv-btn" type="button" class="hidden" data-i18n="result_download_csv">Download CSV</button>
           </div>
         </div>
-        <div id="meta">Datei auswählen, um OCR zu starten.</div>
-        <div id="result-view-switch" class="result-view-switch hidden" role="tablist" aria-label="Ausgabeansicht">
+        <div id="meta" data-i18n="meta_pick_file">Choose a file to start OCR.</div>
+        <div id="result-view-switch" class="result-view-switch hidden" role="tablist" data-i18n-aria-label="aria_result_view" aria-label="Output view">
           <button
             id="result-view-layout-btn"
             class="result-view-btn"
@@ -406,7 +445,7 @@
             data-result-view="layout"
             aria-pressed="false"
           >
-            Layout
+            <span data-i18n="result_view_layout">Layout</span>
           </button>
           <button
             id="result-view-words-btn"
@@ -415,7 +454,7 @@
             data-result-view="words"
             aria-pressed="false"
           >
-            Wörter
+            <span data-i18n="result_view_words">Words</span>
           </button>
           <button
             id="result-view-markdown-btn"
@@ -424,7 +463,7 @@
             data-result-view="markdown"
             aria-pressed="false"
           >
-            Text
+            <span data-i18n="result_view_markdown">Text</span>
           </button>
           <button
             id="result-view-diff-btn"
@@ -433,7 +472,7 @@
             data-result-view="diff"
             aria-pressed="false"
           >
-            Vergleich
+            <span data-i18n="result_view_diff">Compare</span>
           </button>
           <button
             id="result-view-metrics-btn"
@@ -442,12 +481,12 @@
             data-result-view="metrics"
             aria-pressed="false"
           >
-            Metriken
+            <span data-i18n="result_view_metrics">Metrics</span>
           </button>
         </div>
         <section id="layout-wrap" class="hidden">
           <div class="layout-head">
-            <h3>Layout</h3>
+            <h3 data-i18n="layout_heading">Layout</h3>
             <p id="layout-summary"></p>
           </div>
           <div id="layout-visualizations" class="layout-visualizations hidden"></div>
@@ -455,19 +494,19 @@
         </section>
         <section id="words-wrap" class="hidden">
           <div class="layout-head">
-            <h3>Wörter</h3>
+            <h3 data-i18n="words_heading">Words</h3>
             <p id="words-summary"></p>
           </div>
           <div id="words-pages"></div>
         </section>
         <section id="markdown-preview-wrap" class="hidden">
-          <h3>Text</h3>
+          <h3 data-i18n="text_heading">Text</h3>
           <div id="markdown-preview" class="markdown-preview"></div>
         </section>
         <section id="diff-wrap" class="hidden">
           <div class="diff-head">
-            <h3 id="diff-heading">Vergleich</h3>
-            <p id="diff-empty" class="diff-empty">Engine unten wählen, optional Referenztext eingeben und „Vergleichen“ klicken.</p>
+            <h3 id="diff-heading" data-i18n="diff_heading">Compare</h3>
+            <p id="diff-empty" class="diff-empty" data-i18n="diff_empty">Pick an engine below, optionally enter reference text, then click Compare.</p>
           </div>
 
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
@@ -476,7 +515,7 @@
             <details class="diff-group" open>
               <summary>
                 <span class="diff-legend-dot diff-legend-matched" aria-hidden="true"></span>
-                Übereinstimmung
+                <span data-i18n="diff_matched">Match</span>
                 <span class="diff-group-count" id="diff-matched-count">0</span>
               </summary>
               <ul id="diff-matched-list" class="diff-list"></ul>
@@ -484,7 +523,7 @@
             <details class="diff-group" open>
               <summary>
                 <span class="diff-legend-dot diff-legend-mismatch" aria-hidden="true"></span>
-                Abweichung (gleicher Ort, anderer Text)
+                <span data-i18n="diff_mismatch">Mismatch (same place, different text)</span>
                 <span class="diff-group-count" id="diff-mismatch-count">0</span>
               </summary>
               <ul id="diff-mismatch-list" class="diff-list diff-list-pairs"></ul>
@@ -492,7 +531,7 @@
             <details class="diff-group">
               <summary>
                 <span class="diff-legend-dot diff-legend-ours" aria-hidden="true"></span>
-                Nur wir
+                <span data-i18n="diff_ours">Ours only</span>
                 <span class="diff-group-count" id="diff-ours-count">0</span>
               </summary>
               <ul id="diff-ours-list" class="diff-list"></ul>
@@ -500,7 +539,7 @@
             <details class="diff-group">
               <summary>
                 <span class="diff-legend-dot diff-legend-azure" aria-hidden="true"></span>
-                <span id="diff-theirs-label">Nur Andere</span>
+                <span id="diff-theirs-label" data-i18n="diff_theirs_default">Theirs only</span>
                 <span class="diff-group-count" id="diff-azure-count">0</span>
               </summary>
               <ul id="diff-azure-list" class="diff-list"></ul>
@@ -508,11 +547,11 @@
           </div>
 
           <details class="compare-controls" open>
-            <summary>Konfiguration & Referenztext</summary>
+            <summary data-i18n="compare_config_summary">Configuration & reference text</summary>
             <div class="compare-controls-body">
               <form class="compare-form" id="compare-form">
                 <label class="compare-engine-label">
-                  Engine
+                  <span data-i18n="compare_engine_label">Engine</span>
                   <select id="compare-engine">
                     {% for eng in compare_engines %}
                     <option value="{{ eng.name }}">{{ eng.label }}</option>
@@ -521,50 +560,50 @@
                 </label>
 
                 <div class="engine-fields" data-engine="azure">
-                  <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
-                  <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
+                  <input id="azure-endpoint" type="url" data-i18n-placeholder="placeholder_azure_endpoint" placeholder="Azure endpoint URL (e.g. https://…)" autocomplete="off" />
+                  <input id="azure-key" type="password" data-i18n-placeholder="placeholder_azure_key" placeholder="API key" autocomplete="off" />
                 </div>
 
                 <div class="engine-fields hidden" data-engine="local_models">
                   <label class="engine-fields-label">
-                    Eigenes Modell
+                    <span data-i18n="label_our_model">Our model</span>
                     <select id="our-model"></select>
                   </label>
                   <label class="engine-fields-label">
-                    Vergleichsmodell
+                    <span data-i18n="label_their_model">Comparison model</span>
                     <select id="their-model"></select>
                   </label>
                 </div>
 
                 <div class="engine-fields hidden" data-engine="self_peer">
-                  <input id="peer-base-url" type="url" placeholder="Peer-Basis-URL (z. B. https://…)" autocomplete="off" />
-                  <input id="peer-backend" type="text" placeholder="Backend (optional, z. B. expert)" autocomplete="off" />
+                  <input id="peer-base-url" type="url" data-i18n-placeholder="placeholder_peer_base_url" placeholder="Peer base URL (e.g. https://…)" autocomplete="off" />
+                  <input id="peer-backend" type="text" data-i18n-placeholder="placeholder_peer_backend" placeholder="Backend (optional, e.g. expert)" autocomplete="off" />
                   <label class="engine-fields-label">
-                    Peer-Modell
+                    <span data-i18n="label_peer_model">Peer model</span>
                     <select id="peer-model-select" class="hidden"></select>
-                    <input id="peer-model-input" type="text" placeholder="Modellname (z. B. glm-ocr:latest)" autocomplete="off" />
+                    <input id="peer-model-input" type="text" data-i18n-placeholder="placeholder_peer_model" placeholder="Model name (e.g. glm-ocr:latest)" autocomplete="off" />
                   </label>
                   <p id="peer-model-hint" class="engine-fields-hint hidden"></p>
                 </div>
 
                 <div class="engine-fields hidden" data-engine="google_vision">
-                  <input id="google-api-key" type="password" placeholder="Google-Vision-API-Key" autocomplete="off" />
+                  <input id="google-api-key" type="password" data-i18n-placeholder="placeholder_google_api_key" placeholder="Google Vision API key" autocomplete="off" />
                 </div>
 
                 <div class="engine-fields hidden" data-engine="plain_text">
-                  <input id="plain-text-url" type="url" placeholder="Endpunkt-URL" autocomplete="off" />
+                  <input id="plain-text-url" type="url" data-i18n-placeholder="placeholder_plain_text_url" placeholder="Endpoint URL" autocomplete="off" />
                   <div class="engine-fields-row">
-                    <input id="plain-text-method" type="text" placeholder="Methode (POST)" autocomplete="off" />
-                    <input id="plain-text-field" type="text" placeholder="JSON-Feld (text)" autocomplete="off" />
+                    <input id="plain-text-method" type="text" data-i18n-placeholder="placeholder_plain_text_method" placeholder="Method (POST)" autocomplete="off" />
+                    <input id="plain-text-field" type="text" data-i18n-placeholder="placeholder_plain_text_field" placeholder="JSON field (text)" autocomplete="off" />
                   </div>
                   <div class="engine-fields-row">
-                    <input id="plain-text-auth-header" type="text" placeholder="Auth-Header (optional)" autocomplete="off" />
-                    <input id="plain-text-auth-value" type="text" placeholder="Auth-Wert (optional)" autocomplete="off" />
+                    <input id="plain-text-auth-header" type="text" data-i18n-placeholder="placeholder_plain_text_auth_header" placeholder="Auth header (optional)" autocomplete="off" />
+                    <input id="plain-text-auth-value" type="text" data-i18n-placeholder="placeholder_plain_text_auth_value" placeholder="Auth value (optional)" autocomplete="off" />
                   </div>
                 </div>
 
                 <div class="compare-actions">
-                  <button type="submit" class="action-btn">Vergleichen</button>
+                  <button type="submit" class="action-btn" data-i18n="compare_submit">Compare</button>
                   {% if azure_preset_label and azure_preset_endpoint %}
                   <button
                     type="button"
@@ -585,35 +624,34 @@
               </form>
 
               <details class="compare-reference" id="compare-reference">
-                <summary>Referenztext (optional, für CER/WER)</summary>
+                <summary data-i18n="compare_reference_summary">Reference text (optional, for CER/WER)</summary>
                 <div class="compare-reference-body">
-                  <p class="compare-reference-hint">
-                    Liefere echten Text als Ground Truth, um CER, WER und Token-F1 zu
-                    berechnen. Bei digitalen PDFs wird der eingebettete Textlayer
-                    automatisch übernommen – per Häkchen ignorierbar, falls er
-                    unleserlich ist. Die Werte erscheinen im Tab „Metriken“.
+                  <p class="compare-reference-hint" data-i18n="compare_reference_hint">
+                    Provide ground-truth text to compute CER, WER, and token F1. For digital PDFs the embedded text layer is used automatically — check ignore if unreadable. Values appear under Metrics.
                   </p>
                   <div class="compare-reference-row">
                     <span
                       class="compare-reference-badge hidden"
                       id="reference-source-badge"
-                    >Aus PDF entnommen</span>
+                      data-i18n="compare_reference_from_pdf"
+                    >From PDF</span>
                     <label class="compare-reference-checkbox hidden" id="reference-ignore-wrap">
                       <input type="checkbox" id="reference-ignore-embedded" />
-                      Eingebetteten Text ignorieren
+                      <span data-i18n="compare_reference_ignore_embedded">Ignore embedded text</span>
                     </label>
                   </div>
                   <textarea
                     id="reference-text"
                     rows="6"
-                    placeholder="Referenztext hier einfügen oder .txt-Datei hochladen…"
+                    data-i18n-placeholder="compare_reference_placeholder"
+                    placeholder="Paste reference text or upload a .txt file…"
                   ></textarea>
                   <div class="compare-reference-row">
                     <label class="compare-reference-upload">
                       <input type="file" id="reference-file" accept=".txt,text/plain" />
-                      <span>.txt hochladen</span>
+                      <span data-i18n="compare_reference_upload">Upload .txt</span>
                     </label>
-                    <button type="button" class="compare-reference-clear" id="reference-clear-btn">Leeren</button>
+                    <button type="button" class="compare-reference-clear" id="reference-clear-btn" data-i18n="compare_reference_clear">Clear</button>
                   </div>
                 </div>
               </details>
@@ -623,8 +661,8 @@
 
         <section id="metrics-wrap" class="hidden">
           <div class="layout-head">
-            <h3>Metriken</h3>
-            <p id="metrics-empty" class="diff-empty">Werte erscheinen, sobald ein Vergleich gelaufen ist oder ein Referenztext gesetzt wurde.</p>
+            <h3 data-i18n="metrics_heading">Metrics</h3>
+            <p id="metrics-empty" class="diff-empty" data-i18n="metrics_empty">Values appear after a compare run or when reference text is set.</p>
           </div>
           <div class="metrics-panel hidden" id="metrics-panel">
             <div class="metrics-tabs" role="tablist">
@@ -634,14 +672,14 @@
                 data-metrics-tab="intrinsic"
                 role="tab"
                 aria-selected="true"
-              >Intrinsisch</button>
+              ><span data-i18n="metrics_tab_intrinsic">Intrinsic</span></button>
               <button
                 type="button"
                 class="metrics-tab"
                 data-metrics-tab="comparison"
                 role="tab"
                 aria-selected="false"
-              >Vergleich</button>
+              ><span data-i18n="metrics_tab_comparison">Comparison</span></button>
               <button
                 type="button"
                 class="metrics-tab"
@@ -649,19 +687,20 @@
                 role="tab"
                 aria-selected="false"
                 disabled
-                title="Erfordert Referenztext"
-              >Referenz</button>
+                data-i18n-title="metrics_tab_requires_reference"
+                title="Requires reference text"
+              ><span data-i18n="metrics_tab_reference">Reference</span></button>
             </div>
             <div class="metrics-content" id="metrics-content"></div>
           </div>
         </section>
         <section id="table-preview-wrap" class="hidden">
-          <h3>Tabellenvorschau</h3>
+          <h3 data-i18n="table_preview_heading">Table preview</h3>
           <div id="table-preview-body"></div>
         </section>
         <pre id="output" class="visually-hidden" aria-hidden="true"></pre>
         <section id="structured-wrap" class="hidden">
-          <h3>Strukturierte Nutzdaten</h3>
+          <h3 data-i18n="structured_payload_heading">Structured payload</h3>
           <pre id="json-output"></pre>
         </section>
       </section>
@@ -669,13 +708,19 @@
     <div id="loading-overlay" class="loading-overlay" aria-live="polite" role="status">
       <div class="loading-overlay-card">
         <span class="spinner" aria-hidden="true"></span>
-        <span>OCR wird ausgeführt – bitte warten…</span>
+        <span data-i18n="loading_ocr">Running OCR — please wait…</span>
       </div>
     </div>
     <div id="global-drop-overlay" class="global-drop-overlay" aria-hidden="true">
-      <div class="global-drop-card">Datei ablegen, um OCR zu starten</div>
+      <div class="global-drop-card" data-i18n="global_drop">Drop a file to start OCR</div>
     </div>
 
+    <script>
+      window.__UI_CATALOG = {{ ui_catalog_json | safe }};
+      window.__UI_LOCALE = {{ app_locale | tojson }};
+      window.__UI_MESSAGES = {{ ui_messages_json | safe }};
+    </script>
+    <script src="{{ app_base_path }}/static/i18n.js?v={{ static_version }}"></script>
     <script src="{{ app_base_path }}/static/app.js?v={{ static_version }}"></script>
   </body>
 </html>

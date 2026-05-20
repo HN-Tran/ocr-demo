@@ -22,6 +22,12 @@ from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 
 
+def _json_body(response: Any) -> Any:
+    body = response.body
+    raw = body.tobytes() if isinstance(body, memoryview) else body
+    return json.loads(raw.decode("utf-8"))
+
+
 def _png_bytes() -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -90,6 +96,8 @@ class FakeBackendRouter:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -106,6 +114,7 @@ class FakeBackendRouter:
             "expert_layout_model": expert_layout_model,
             "expert_table_transformer": expert_table_transformer,
             "expert_word_detector": expert_word_detector,
+            "inference_provider": inference_provider,
         }
         result = type(
             "OCRResult",
@@ -189,6 +198,8 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -204,6 +215,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_table_transformer=expert_table_transformer,
+            inference_provider=inference_provider,
             expert_word_detector=expert_word_detector,
         )
         result.layout = None
@@ -216,7 +228,7 @@ def _pipeline() -> OCRBackendRouter:
 
 def test_compat_service_ready_payload() -> None:
     response = asyncio.run(compat_service_ready())
-    payload = json.loads(response.body.decode("utf-8"))
+    payload = _json_body(response)
     assert payload["status"] == "ok"
     assert payload["service"] == "prebuilt-read"
     assert payload["apiStatus"] == "Healthy"
@@ -226,8 +238,8 @@ def test_compat_service_ready_payload() -> None:
 def test_compat_usage_and_auth_stubs() -> None:
     usage_response = asyncio.run(compat_usage_logs(month="03", year="2026"))
     renew_response = asyncio.run(compat_authentication_renew(token="abc"))
-    usage_payload = json.loads(usage_response.body.decode("utf-8"))
-    renew_payload = json.loads(renew_response.body.decode("utf-8"))
+    usage_payload = _json_body(usage_response)
+    renew_payload = _json_body(renew_response)
     assert usage_payload["meters"] == []
     assert usage_payload["month"] == "03"
     assert renew_payload == {"status": "ok", "token": "abc"}
@@ -250,7 +262,7 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
             pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
-    payload = json.loads(response.body.decode("utf-8"))
+    payload = _json_body(response)
 
     assert fake_pipeline.last_call["backend"] == "expert"
     assert fake_pipeline.last_call["expert_enable_layout"] is True
@@ -323,7 +335,7 @@ def test_sync_analyze_without_layout_keeps_word_shape_stable() -> None:
             pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
-    payload = json.loads(response.body.decode("utf-8"))
+    payload = _json_body(response)
 
     assert payload["analyzeResult"]["pages"] == [
         {
@@ -398,7 +410,7 @@ async def test_async_analyze_returns_operation_location_and_result_can_be_polled
         api_version="2022-08-31",
         store=store,
     )
-    initial_payload = json.loads(initial_poll.body.decode("utf-8"))
+    initial_payload = _json_body(initial_poll)
     assert initial_payload["status"] in {"notStarted", "running", "succeeded"}
     assert initial_poll.headers["apim-request-id"] == analyze_response.headers["apim-request-id"]
 
@@ -411,7 +423,7 @@ async def test_async_analyze_returns_operation_location_and_result_can_be_polled
         api_version="2022-08-31",
         store=store,
     )
-    payload = json.loads(poll_response.body.decode("utf-8"))
+    payload = _json_body(poll_response)
     assert payload["status"] == "succeeded"
     assert payload["analyzeResult"]["modelId"] == "prebuilt-read"
     assert payload["analyzeResult"]["content"] == "page one\n\npage two"

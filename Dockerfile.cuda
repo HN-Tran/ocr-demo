@@ -1,0 +1,36 @@
+# NVIDIA layout GPU — official CUDA PyTorch image (docker-compose.cuda.yml).
+ARG PYTORCH_CUDA_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
+FROM ${PYTORCH_CUDA_IMAGE} AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VERIFY_SSL=false \
+    HF_HOME=/home/appuser/.cache/huggingface \
+    TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface \
+    TORCH_HOME=/home/appuser/.cache/torch \
+    XDG_CACHE_HOME=/home/appuser/.cache \
+    EXAMPLE_1_LABEL="OCR Smoke" \
+    EXAMPLE_1_PATH="/app/data/samples/ocr-smoke.png"
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git libgl1 libglib2.0-0 libgomp1 libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY scripts/docker_install_app_deps.py /tmp/docker_install_app_deps.py
+COPY app ./app
+COPY eval ./eval
+COPY tests ./tests
+COPY data ./data
+
+RUN python3 /tmp/docker_install_app_deps.py
+
+RUN useradd -r -u 101 -m appuser && \
+    mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appuser /home/appuser /app
+
+USER 101
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

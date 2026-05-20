@@ -8,8 +8,9 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
+from starlette.routing import Route
 
-from app.api.routes import health, ocr, router, schemas
+from app.api.routes import ocr, router, schemas
 from app.services.backend_router import OCRBackendRouter
 
 
@@ -87,6 +88,8 @@ class FakeBackendRouter:
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -104,6 +107,7 @@ class FakeBackendRouter:
             "expert_layout_model": expert_layout_model,
             "expert_table_transformer": expert_table_transformer,
             "expert_word_detector": expert_word_detector,
+            "inference_provider": inference_provider,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
@@ -192,6 +196,8 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         expert_layout_threshold: float | None = None,
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
+        inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -207,6 +213,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
             expert_enable_layout=expert_enable_layout,
             expert_layout_model=expert_layout_model,
             expert_table_transformer=expert_table_transformer,
+            inference_provider=inference_provider,
             expert_word_detector=expert_word_detector,
         )
         result.page_infos = None
@@ -220,8 +227,17 @@ def _pipeline() -> OCRBackendRouter:
 
 
 def test_health() -> None:
-    payload = asyncio.run(health())
+    from starlette.testclient import TestClient
+    from test_main import _settings
+
+    from app.main import _create_ocr_app
+
+    client = TestClient(_create_ocr_app(settings=_settings()))
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["status"] == "ok"
+    assert "inference_providers" in payload
 
 
 def test_schemas_contains_new_presets() -> None:
@@ -709,7 +725,7 @@ def test_ocr_forwards_expert_enable_layout() -> None:
 
 
 def test_api_v1_alias_routes_exist() -> None:
-    route_paths = {route.path for route in router.routes}
+    route_paths = {route.path for route in router.routes if isinstance(route, Route)}
     assert "/api/health/" in route_paths
     assert "/api/models/" in route_paths
     assert "/api/schemas/" in route_paths

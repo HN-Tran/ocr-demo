@@ -43,8 +43,7 @@ def _normalize_words_per_page(pages: list[Any]) -> list[list[dict[str, Any]]]:
                     norm = floats
                 else:
                     norm = [
-                        float(v) / (pw if i % 2 == 0 else ph) * 1000
-                        for i, v in enumerate(floats)
+                        float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(floats)
                     ]
             else:
                 norm = []
@@ -93,7 +92,9 @@ class AzureEngine:
             else:
                 url = f"{self._endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
                 resp = await client.post(
-                    url, content=image_bytes, headers=headers,
+                    url,
+                    content=image_bytes,
+                    headers=headers,
                     params={"api-version": AZURE_API_VERSION},
                 )
             resp.raise_for_status()

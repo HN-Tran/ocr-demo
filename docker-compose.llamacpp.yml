@@ -1,0 +1,108 @@
+# llama.cpp server with GLM-OCR (OpenAI-compatible API on :8080).
+#
+# Pick the service that matches your GPU:
+#
+#   AMD Radeon (e.g. RX 9070 XT) — try Vulkan first:
+#     docker compose -f docker-compose.llamacpp.yml up llamacpp-vulkan
+#
+#   AMD with ROCm stack on the host (Ubuntu 24.04 / ROCm 6.3+):
+#     docker compose -f docker-compose.llamacpp.yml up llamacpp-rocm
+#
+#   NVIDIA:
+#     docker compose -f docker-compose.llamacpp.yml --profile nvidia up llamacpp-cuda
+#
+#   CPU only:
+#     docker compose -f docker-compose.llamacpp.yml --profile cpu up llamacpp-cpu
+#
+# The default service name "llamacpp" is an alias for llamacpp-vulkan (AMD-friendly).
+# First start downloads GGUF weights into volume llamacpp_cache.
+
+x-llamacpp-glm-ocr-command: &llamacpp-glm-ocr-command
+  - -hf
+  - "${LLAMACPP_HF_REPO:-ggml-org/GLM-OCR-GGUF}"
+  - --host
+  - "0.0.0.0"
+  - --port
+  - "8080"
+  - -c
+  - "${LLAMACPP_CTX:-8192}"
+  - --n-gpu-layers
+  - "${LLAMACPP_N_GPU_LAYERS:-99}"
+  - --temp
+  - "0"
+
+x-llamacpp-env: &llamacpp-env
+  HF_HOME: /cache/huggingface
+  # HF_TOKEN: ${HF_TOKEN:-}
+
+services:
+  # AMD / Intel / many Linux setups (Vulkan). Good first choice for RX 9070 XT.
+  llamacpp-vulkan:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    ports:
+      - "${LLAMACPP_PORT:-8080}:8080"
+    environment: *llamacpp-env
+    volumes:
+      - llamacpp_cache:/cache
+    devices:
+      - /dev/dri:/dev/dri
+    # group_add:
+    #   - "${DOCKER_GPU_GID}"
+    command: *llamacpp-glm-ocr-command
+    restart: unless-stopped
+
+  # AMD with ROCm (requires working /dev/kfd + amdgpu on host, recent ROCm).
+  llamacpp-rocm:
+    profiles: ["rocm"]
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    ports:
+      - "${LLAMACPP_PORT:-8080}:8080"
+    environment: *llamacpp-env
+    volumes:
+      - llamacpp_cache:/cache
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    # group_add:
+    #   - "${DOCKER_GPU_GID}"
+    security_opt:
+      - seccomp=unconfined
+    command: *llamacpp-glm-ocr-command
+    restart: unless-stopped
+
+  # NVIDIA CUDA only — not for Radeon RX 9070 XT.
+  llamacpp-cuda:
+    profiles: ["nvidia"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    ports:
+      - "${LLAMACPP_PORT:-8080}:8080"
+    environment: *llamacpp-env
+    volumes:
+      - llamacpp_cache:/cache
+    gpus: ${LLAMACPP_GPU_DEVICES:-all}
+    command: *llamacpp-glm-ocr-command
+    restart: unless-stopped
+
+  llamacpp-cpu:
+    profiles: ["cpu"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    ports:
+      - "${LLAMACPP_PORT:-8080}:8080"
+    environment: *llamacpp-env
+    volumes:
+      - llamacpp_cache:/cache
+    command:
+      - -hf
+      - "${LLAMACPP_HF_REPO:-ggml-org/GLM-OCR-GGUF}"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - -c
+      - "${LLAMACPP_CTX:-8192}"
+      - --temp
+      - "0"
+    restart: unless-stopped
+
+volumes:
+  llamacpp_cache:

@@ -1,0 +1,22 @@
+# docread + llama.cpp GLM-OCR on one network (no host uv/ollama required).
+#
+#   docker compose -f docker-compose.stack.yml up --build
+#
+# Uses llamacpp-vulkan by default (AMD-friendly). Override INFERENCE_BASE_URL
+# if you switch to llamacpp-rocm / llamacpp-cuda (see docs/llamacpp-docker-glm-ocr.md).
+
+include:
+  - docker-compose.yml
+  - docker-compose.llamacpp.yml
+
+services:
+  app:
+    environment:
+      INFERENCE_PROVIDER: ${INFERENCE_PROVIDER:-openai_compatible}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://llamacpp-vulkan:8080/v1}
+      INFERENCE_MODEL: ${INFERENCE_MODEL:-GLM-OCR-Q8_0.gguf}
+      INFERENCE_VISION_MODELS: ${INFERENCE_VISION_MODELS:-GLM-OCR-Q8_0.gguf}
+      INFERENCE_VISION_PROBE: ${INFERENCE_VISION_PROBE:-false}
+    depends_on:
+      llamacpp-vulkan:
+        condition: service_started

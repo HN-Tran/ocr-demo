@@ -1,6 +1,9 @@
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.i18n import normalize_locale
 
 
 def _env_int(key: str, default: int) -> int:
@@ -35,16 +38,84 @@ def _env_bool(key: str, default: bool) -> bool:
     return default
 
 
+def _parse_csv_tuple(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def _parse_inference_extra_providers(raw: str) -> dict[str, "InferenceProviderConfig"]:
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"INFERENCE_EXTRA_PROVIDERS ist kein gültiges JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("INFERENCE_EXTRA_PROVIDERS muss ein JSON-Objekt sein.")
+    out: dict[str, InferenceProviderConfig] = {}
+    for provider_id, entry in payload.items():
+        key = str(provider_id).strip().lower()
+        if key not in {"ollama", "openai_compatible"}:
+            raise ValueError(
+                f"Unbekannter Zusatz-Provider '{provider_id}' in INFERENCE_EXTRA_PROVIDERS."
+            )
+        if not isinstance(entry, dict):
+            raise ValueError(f"Konfiguration für Provider '{provider_id}' muss ein Objekt sein.")
+        base_url = str(entry.get("base_url", "")).strip()
+        if not base_url:
+            raise ValueError(f"base_url fehlt für Provider '{provider_id}'.")
+        api_key = str(entry.get("api_key", "")).strip()
+        vision_raw = entry.get("vision_models", [])
+        if isinstance(vision_raw, str):
+            vision_models = _parse_csv_tuple(vision_raw)
+        elif isinstance(vision_raw, list):
+            vision_models = tuple(str(item).strip() for item in vision_raw if str(item).strip())
+        else:
+            vision_models = ()
+        vision_probe_raw = entry.get("vision_probe")
+        vision_probe = None
+        if isinstance(vision_probe_raw, bool):
+            vision_probe = vision_probe_raw
+        elif isinstance(vision_probe_raw, str):
+            normalized = vision_probe_raw.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                vision_probe = True
+            elif normalized in {"0", "false", "no", "off"}:
+                vision_probe = False
+        out[key] = InferenceProviderConfig(
+            base_url=base_url,
+            api_key=api_key,
+            vision_models=vision_models,
+            vision_probe=vision_probe,
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class InferenceProviderConfig:
+    base_url: str
+    api_key: str
+    vision_models: tuple[str, ...]
+    vision_probe: bool | None = None
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
     app_base_path: str
     analyze_store_dir: str
+    inference_provider: str
+    inference_base_url: str
+    inference_model: str
+    inference_api_key: str
+    inference_vision_models: tuple[str, ...]
+    inference_vision_probe: bool
+    inference_extra_providers: dict[str, InferenceProviderConfig]
     ollama_base_url: str
     ollama_model: str
     ocr_backend: str
     ocr_expert_enable_layout: bool
     ocr_expert_layout_model: str
+    ocr_expert_layout_device: str
     ocr_expert_table_transformer: bool
     ocr_expert_per_region_ocr: bool
     ocr_expert_text_anchor: bool
@@ -72,6 +143,7 @@ class Settings:
     deskew_min_angle_deg: float
     host: str
     port: int
+    app_locale: str
 
 
 def get_settings() -> Settings:
@@ -81,7 +153,36 @@ def get_settings() -> Settings:
     if default_token_limit > 128000:
         default_token_limit = 128000
 
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    inference_provider = os.getenv("INFERENCE_PROVIDER", "ollama").strip().lower()
+    if inference_provider not in {"ollama", "openai_compatible"}:
+        inference_provider = "ollama"
+
+    inference_base_url = (
+        os.getenv("INFERENCE_BASE_URL", "").strip()
+        or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+    )
+    if not inference_base_url:
+        inference_base_url = "http://localhost:11434"
+    if inference_provider == "openai_compatible" and inference_base_url == "http://localhost:11434":
+        if (
+            not os.getenv("INFERENCE_BASE_URL", "").strip()
+            and not os.getenv("OLLAMA_BASE_URL", "").strip()
+        ):
+            inference_base_url = "http://localhost:8000/v1"
+
+    inference_model = (
+        os.getenv("INFERENCE_MODEL", "").strip()
+        or os.getenv("OLLAMA_MODEL", "glm-ocr:latest").strip()
+    )
+    inference_api_key = os.getenv("INFERENCE_API_KEY", "").strip()
+    inference_vision_models = _parse_csv_tuple(os.getenv("INFERENCE_VISION_MODELS", ""))
+    inference_vision_probe = _env_bool("INFERENCE_VISION_PROBE", True)
+    inference_extra_providers = _parse_inference_extra_providers(
+        os.getenv("INFERENCE_EXTRA_PROVIDERS", "")
+    )
+
+    ollama_base_url = inference_base_url
+    ollama_model = inference_model
 
     ocr_backend = os.getenv("OCR_BACKEND", "expert").strip().lower()
     if ocr_backend not in {"direct", "expert"}:
@@ -97,16 +198,22 @@ def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "docread"),
         app_base_path=os.getenv("APP_BASE_PATH", ""),
-        analyze_store_dir=str(
-            Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/docread-analyze-results"))
-        ),
+        analyze_store_dir=str(Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/docread-analyze-results"))),
+        inference_provider=inference_provider,
+        inference_base_url=inference_base_url,
+        inference_model=inference_model,
+        inference_api_key=inference_api_key,
+        inference_vision_models=inference_vision_models,
+        inference_vision_probe=inference_vision_probe,
+        inference_extra_providers=inference_extra_providers,
         ollama_base_url=ollama_base_url,
-        ollama_model=os.getenv("OLLAMA_MODEL", "glm-ocr:latest"),
+        ollama_model=ollama_model,
         ocr_backend=ocr_backend,
         ocr_expert_enable_layout=_env_bool("OCR_EXPERT_ENABLE_LAYOUT", True),
         ocr_expert_layout_model=os.getenv(
             "OCR_EXPERT_LAYOUT_MODEL", "PaddlePaddle/PP-DocLayoutV3_safetensors"
         ),
+        ocr_expert_layout_device=os.getenv("OCR_EXPERT_LAYOUT_DEVICE", "auto").strip().lower(),
         ocr_expert_table_transformer=_env_bool("OCR_EXPERT_TABLE_TRANSFORMER", False),
         ocr_expert_per_region_ocr=_env_bool("OCR_EXPERT_PER_REGION_OCR", True),
         ocr_expert_text_anchor=_env_bool("OCR_EXPERT_TEXT_ANCHOR", True),
@@ -136,4 +243,5 @@ def get_settings() -> Settings:
         max_image_dim=_env_int("MAX_IMAGE_DIM", 3600),
         host=os.getenv("HOST", "127.0.0.1"),
         port=_env_int("PORT", 8000),
+        app_locale=normalize_locale(os.getenv("APP_LOCALE", "en")),
     )

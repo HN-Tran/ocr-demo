@@ -5,13 +5,30 @@ services:
       target: runtime
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - docread_model_cache:/home/appuser/.cache
     environment:
+      HF_HOME: /home/appuser/.cache/huggingface
+      TRANSFORMERS_CACHE: /home/appuser/.cache/huggingface
+      TORCH_HOME: /home/appuser/.cache/torch
+      XDG_CACHE_HOME: /home/appuser/.cache
       APP_BASE_PATH: ${APP_BASE_PATH:-}
+      APP_LOCALE: ${APP_LOCALE:-en}
+      INFERENCE_PROVIDER: ${INFERENCE_PROVIDER:-ollama}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-}
+      INFERENCE_MODEL: ${INFERENCE_MODEL:-}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      INFERENCE_VISION_MODELS: ${INFERENCE_VISION_MODELS:-}
+      INFERENCE_VISION_PROBE: ${INFERENCE_VISION_PROBE:-true}
+      INFERENCE_EXTRA_PROVIDERS: ${INFERENCE_EXTRA_PROVIDERS:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://172.17.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-glm-ocr:latest}
       OCR_BACKEND: ${OCR_BACKEND:-expert}
       OCR_EXPERT_ENABLE_LAYOUT: ${OCR_EXPERT_ENABLE_LAYOUT:-true}
       OCR_EXPERT_LAYOUT_MODEL: ${OCR_EXPERT_LAYOUT_MODEL:-PaddlePaddle/PP-DocLayoutV3_safetensors}
+      OCR_EXPERT_LAYOUT_DEVICE: ${OCR_EXPERT_LAYOUT_DEVICE:-auto}
       DEFAULT_TOKEN_LIMIT: ${DEFAULT_TOKEN_LIMIT:-16384}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-8388608}
       MAX_IMAGE_DIM: ${MAX_IMAGE_DIM:-2048}
@@ -45,5 +62,6 @@ services:
       mypy app eval tests &&
       pytest -q"
 
-#volumes:
+volumes:
+  docread_model_cache:
 #  ollama_data:

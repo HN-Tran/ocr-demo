@@ -1,15 +1,15 @@
 [English](README.md) · [Deutsch](README_DE.md)
 
-# docread (Ollama + FastAPI)
+# docread (FastAPI + pluggable vision LLMs)
 
-Document OCR service using an Ollama vision model via a FastAPI backend, including a lightweight web interface and evaluation runner.
+Document OCR service using vision language models via a FastAPI backend. Inference defaults to Ollama and can use OpenAI-compatible servers (llama.cpp, vLLM, etc.). Includes a lightweight web UI and evaluation runner.
 
 ## Features
 
 - `POST /api/ocr` for plain-text or structured extraction
 - `POST /api/compare` for side-by-side comparison against external engines (Azure, docread-Peer, Google Vision, Plain-Text-Endpoint) including a metrics panel and optional CER/WER against reference text
 - `POST /api/benchmark` for batch benchmarks (N files × M runners) with live progress, CSV export, and optional MLflow tracking
-- `GET /api/models` to list available Ollama models
+- `GET /api/models` to list models from the configured inference provider
 - `GET /api/schemas` to display supported structured schemas
 - `GET /docs` (Swagger UI) and `GET /redoc` (ReDoc) for interactive API documentation
 - Browser UI at `/` with centered start card, drag-and-drop upload, auto-run on file selection, expert options, quick JSON presets (invoice, receipt, table, business card), light/dark mode, image/PDF preview, JSON highlighting, and CSV download for tables
@@ -20,8 +20,7 @@ Document OCR service using an Ollama vision model via a FastAPI backend, includi
 
 - Python 3.12+
 - `uv` 0.10+
-- Running Ollama instance (default: `http://localhost:11434`)
-- A vision-capable model in Ollama
+- A vision-capable model on your inference backend (Ollama by default, or an OpenAI-compatible server)
 
 ## Setup
 
@@ -32,8 +31,19 @@ uv sync --all-groups
 Optional environment variables:
 
 ```bash
-export OLLAMA_BASE_URL="http://localhost:11434"
-export OLLAMA_MODEL="glm-ocr:latest"
+export INFERENCE_PROVIDER="ollama"              # ollama | openai_compatible
+export INFERENCE_BASE_URL="http://localhost:11434"
+export INFERENCE_MODEL="glm-ocr:latest"
+# OpenAI-compatible example (vLLM / llama.cpp server); GLM-OCR via Docker: docs/llamacpp-docker-glm-ocr.md
+# export INFERENCE_PROVIDER="openai_compatible"
+# export INFERENCE_BASE_URL="http://localhost:8000/v1"
+# export INFERENCE_MODEL="your-vision-model"
+# export INFERENCE_API_KEY=""                   # optional Bearer token
+# export INFERENCE_VISION_MODELS="model-a"      # optional comma-separated allowlist for vision_only
+# export INFERENCE_VISION_PROBE="true"          # probe OpenAI-compatible catalogs when allowlist empty
+# export INFERENCE_EXTRA_PROVIDERS='{"openai_compatible":{"base_url":"http://localhost:8000/v1"}}'
+# Legacy aliases (still supported): OLLAMA_BASE_URL, OLLAMA_MODEL
+# API: inference_provider form field; model as provider/model (e.g. openai_compatible/my-vlm)
 export OCR_BACKEND="direct" # direct | expert
 export OCR_EXPERT_MODE="selfhosted"
 export OCR_EXPERT_ENABLE_LAYOUT="true"
@@ -432,13 +442,33 @@ Notes:
 
 ## Docker (isolated execution and testing)
 
-Build and start app + Ollama:
+Build and start the app:
 
 ```bash
 docker compose up --build
 ```
 
 Open: `http://127.0.0.1:8000`
+
+UI language defaults to English (`APP_LOCALE=en`). Use the **EN / DE** toggle next to the theme control, or set `APP_LOCALE=de` in `.env`. Preference is stored in a cookie and `localStorage`.
+
+Docker persists downloaded models in the `docread_model_cache` volume (`/home/appuser/.cache`). Default image uses **CPU** PyTorch (`Dockerfile`). GPU layout uses official base images (see [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
+
+```bash
+# NVIDIA — Dockerfile.cuda (pytorch/pytorch)
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+
+# AMD — Dockerfile.rocm (rocm/pytorch)
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+```
+
+GPU vision LLM uses **llama.cpp** ([`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)), not PyTorch Vulkan.
+
+Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`. For docread + bundled GLM-OCR:
+
+```bash
+docker compose -f docker-compose.stack.yml up --build
+```
 
 GPU notes:
 
