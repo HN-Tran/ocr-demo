@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Install docread without replacing torch/torchvision from the base image."""
+
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 APP_ROOT = Path(os.environ.get("APP_ROOT", "/app"))
 SKIP = frozenset({"torch", "torchvision"})
@@ -28,7 +30,17 @@ def main() -> None:
         deps.extend(_filter_specs(list(data["project"]["optional-dependencies"].get(extra, []))))
 
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade", "pip", "setuptools", "wheel"]
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-cache-dir",
+            "--upgrade",
+            "pip",
+            "setuptools",
+            "wheel",
+        ]
     )
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--no-deps", str(APP_ROOT)]

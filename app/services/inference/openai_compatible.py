@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Sequence
+from collections.abc import Sequence
 
 import httpx
 
@@ -77,9 +77,7 @@ class OpenAICompatibleClient:
 
         guessed = guess_vision_from_name(model)
         if guessed is not None:
-            set_cached_vision_probe(
-                base_url=self.base_url, model=model, supports=guessed
-            )
+            set_cached_vision_probe(base_url=self.base_url, model=model, supports=guessed)
             return guessed
 
         if not self._vision_probe:
@@ -109,9 +107,7 @@ class OpenAICompatibleClient:
                         if isinstance(content, str) and content.strip():
                             return True
             return False
-        return not response_indicates_no_vision(
-            response.status_code, response.text
-        )
+        return not response_indicates_no_vision(response.status_code, response.text)
 
     async def run_vision_chat(
         self,

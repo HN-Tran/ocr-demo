@@ -7,7 +7,7 @@ from app.services.inference.model_ref import parse_model_ref
 from app.services.inference.protocol import VisionLlmClient
 
 if TYPE_CHECKING:
-    from app.config import InferenceProviderConfig, Settings
+    from app.config import Settings
 
 
 @dataclass(frozen=True)
@@ -119,9 +119,7 @@ def create_vision_registry(settings: Settings) -> VisionClientRegistry:
         if provider_id in clients:
             continue
         probe_enabled = (
-            settings.inference_vision_probe
-            if cfg.vision_probe is None
-            else cfg.vision_probe
+            settings.inference_vision_probe if cfg.vision_probe is None else cfg.vision_probe
         )
         clients[provider_id] = _client_for_provider(
             provider_id,

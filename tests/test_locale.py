@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from app.config import get_settings
-from app.i18n import DEFAULT_LOCALE, load_messages, normalize_locale, resolve_locale, t
+from app.i18n import DEFAULT_LOCALE, normalize_locale, resolve_locale, t
 
 
 def test_normalize_locale_defaults_to_en() -> None:
@@ -26,6 +28,6 @@ def test_resolve_locale_priority() -> None:
     assert resolve_locale(settings_locale="de") == "de"
 
 
-def test_settings_default_locale_en(monkeypatch) -> None:
+def test_settings_default_locale_en(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_LOCALE", raising=False)
     assert get_settings().app_locale == DEFAULT_LOCALE

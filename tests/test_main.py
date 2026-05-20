@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from typing import cast
 
+import pytest
+from fastapi import FastAPI
 from starlette.routing import Mount, Route
 
 from app.config import Settings
@@ -57,7 +61,7 @@ def _settings(*, app_base_path: str = "") -> Settings:
     )
 
 
-def _route_by_path(routes: list[object], path: str) -> Route:
+def _route_by_path(routes: Sequence[object], path: str) -> Route:
     for route in routes:
         if isinstance(route, Route) and route.path == path:
             return route
@@ -85,7 +89,7 @@ def test_status_endpoint_exists_on_direct_app() -> None:
 
 
 def test_status_endpoint_exists_on_wrapped_app_root_and_mounted_app(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.main.get_settings", lambda: _settings(app_base_path="/ocr"))
     app = create_app()
@@ -99,8 +103,11 @@ def test_status_endpoint_exists_on_wrapped_app_root_and_mounted_app(
     assert root_payload["status"] == "ok"
     assert root_payload["service"] == "prebuilt-read"
 
-    mounted_ocr_app = next(
-        route.app for route in app.routes if isinstance(route, Mount) and route.path == "/ocr"
+    mounted_ocr_app = cast(
+        FastAPI,
+        next(
+            route.app for route in app.routes if isinstance(route, Mount) and route.path == "/ocr"
+        ),
     )
     mounted_paths = {route.path for route in mounted_ocr_app.routes if hasattr(route, "path")}
     assert "/status" in mounted_paths

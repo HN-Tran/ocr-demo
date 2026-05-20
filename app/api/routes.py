@@ -46,23 +46,23 @@ from app.services.compare_engines import (
     Engine,
     EngineResult,
 )
-from app.services.compare_engines.azure import AzureEngine
 from app.services.compare_engines import (
     available_engines as compare_available_engines,
 )
 from app.services.compare_engines import (
     build_engine as build_compare_engine,
 )
+from app.services.compare_engines.azure import AzureEngine
 from app.services.compare_metrics import (
     compute as compute_compare_metrics,
 )
 from app.services.compare_metrics import (
     reference_only as compute_reference_metrics,
 )
-from app.services.mlflow_sink import MlflowSink
-from app.services.ocr_pipeline import OCRResult
 from app.services.inference import InferenceError, VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
+from app.services.mlflow_sink import MlflowSink
+from app.services.ocr_pipeline import OCRResult
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
 router = APIRouter(prefix="/api")
@@ -1798,18 +1798,26 @@ async def benchmark_create(
         parts = entry.split("::", 1)
         model_name = parts[0].strip()
         backend_override = parts[1].strip() if len(parts) > 1 else None
-        suffix = f" ({_BACKEND_LABELS[backend_override]})" if backend_override in _BACKEND_LABELS else ""
-        runners.append(_LocalModelRunner(
-            label=f"{model_name}{suffix}",
-            model=model_name,
-            backend=backend_override,
-            pipeline=pipeline,
-            assemble_from_regions=(backend_override == "expert"),
-        ))
+        suffix = (
+            f" ({_BACKEND_LABELS[backend_override]})" if backend_override in _BACKEND_LABELS else ""
+        )
+        runners.append(
+            _LocalModelRunner(
+                label=f"{model_name}{suffix}",
+                model=model_name,
+                backend=backend_override,
+                pipeline=pipeline,
+                assemble_from_regions=(backend_override == "expert"),
+            )
+        )
     for engine_name in engine_list:
         if engine_name in ("azure_preset", "azure_preset_layout"):
             is_layout = engine_name == "azure_preset_layout"
-            url = settings.azure_preset_layout_endpoint if is_layout else settings.azure_preset_endpoint
+            url = (
+                settings.azure_preset_layout_endpoint
+                if is_layout
+                else settings.azure_preset_endpoint
+            )
             if not url:
                 missing = "AZURE_PRESET_LAYOUT_ENDPOINT" if is_layout else "AZURE_PRESET_ENDPOINT"
                 raise HTTPException(
@@ -1873,8 +1881,7 @@ async def benchmark_list_zip(
         return {"files": []}
     return {
         "files": [
-            {"name": name, "has_reference": bool(ref)}
-            for name, _bytes, _ctype, ref in entries
+            {"name": name, "has_reference": bool(ref)} for name, _bytes, _ctype, ref in entries
         ]
     }
 

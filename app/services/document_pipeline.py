@@ -19,7 +19,10 @@ from typing import Any, cast
 from PIL import Image
 from rapidfuzz import fuzz
 
-from app.services.deskew import detect_cardinal_rotation, deskew_image
+from app.services.deskew import deskew_image, detect_cardinal_rotation
+from app.services.inference import InferenceError
+from app.services.inference.protocol import VisionLlmClient
+from app.services.inference.registry import VisionClientRegistry
 from app.services.layout_detector import HFLayoutDetector, LayoutDetectorConfig
 from app.services.ocr_pipeline import (
     PLAIN_TASK_OCR_TEXT,
@@ -28,8 +31,6 @@ from app.services.ocr_pipeline import (
     encode_page_images,
     normalize_ocr_text_output,
 )
-from app.services.inference import InferenceError
-from app.services.inference.registry import VisionClientRegistry
 from app.services.table_structure_recognizer import TableStructureRecognizer
 from app.services.word_detector import WordDetector, create_word_detector
 
@@ -440,7 +441,7 @@ class DocumentPipeline:
     ) -> None:
         self.direct_pipeline = direct_pipeline
         self.vision_registry = vision_registry
-        self._run_client = None
+        self._run_client: VisionLlmClient | None = None
         self.default_model = default_model
         self.enable_layout = enable_layout
         self.layout_model = layout_model
@@ -454,9 +455,7 @@ class DocumentPipeline:
         self.layout_max_dim = max(256, int(layout_max_dim))
         # Inherited from direct_pipeline so both pipelines share one setting.
         self.deskew_enabled = bool(getattr(direct_pipeline, "deskew_enabled", False))
-        self.deskew_min_angle_deg = float(
-            getattr(direct_pipeline, "deskew_min_angle_deg", 0.5)
-        )
+        self.deskew_min_angle_deg = float(getattr(direct_pipeline, "deskew_min_angle_deg", 0.5))
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
         self._word_detector_cache: dict[str, WordDetector | None] = {}
@@ -639,14 +638,10 @@ class DocumentPipeline:
                 # Per-region cardinal orientation detection (handles multi-doc scans).
                 precomputed_crop: bytes | None = None
                 if self.deskew_enabled:
-                    crop_img = self._crop_region_image(
-                        image, region.get("bbox_2d", [0, 0, 0, 0])
-                    )
+                    crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
                     if crop_img is not None:
                         try:
-                            rot, conf = await asyncio.to_thread(
-                                detect_cardinal_rotation, crop_img
-                            )
+                            rot, conf = await asyncio.to_thread(detect_cardinal_rotation, crop_img)
                         except Exception as exc:  # noqa: BLE001
                             warnings.append(
                                 f"Region {idx} Orientierungserkennung fehlgeschlagen: {exc}"
@@ -663,9 +658,7 @@ class DocumentPipeline:
                             corrected.save(buf, format="PNG")
                             precomputed_crop = buf.getvalue()
                             layout_region["region_angle"] = rot
-                            warnings.append(
-                                f"Region {idx} ({label}): {rot}° CCW Rotation erkannt"
-                            )
+                            warnings.append(f"Region {idx} ({label}): {rot}° CCW Rotation erkannt")
 
                 try:
                     candidate = await self._ocr_region(

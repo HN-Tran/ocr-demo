@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from app.config import get_settings
 from app.services.layout_detector import resolve_layout_device
 
@@ -27,6 +29,6 @@ def test_resolve_layout_device_cuda_unavailable_falls_back() -> None:
         assert resolve_layout_device("cuda") == "cpu"
 
 
-def test_settings_default_layout_device(monkeypatch) -> None:
+def test_settings_default_layout_device(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OCR_EXPERT_LAYOUT_DEVICE", raising=False)
     assert get_settings().ocr_expert_layout_device == "auto"

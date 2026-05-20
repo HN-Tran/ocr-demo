@@ -2,16 +2,17 @@
 
 Uses OpenCV (already in pyproject.toml) — no new dependencies required.
 """
+
 from __future__ import annotations
 
-import numpy as np
 import cv2
+import numpy as np
 from PIL import Image
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_gray(img: Image.Image) -> np.ndarray:
     return np.array(img.convert("L"), dtype=np.uint8)
@@ -47,18 +48,18 @@ def _boundary_asymmetry(gray: np.ndarray) -> float:
     in_band = False
     prev_val = 0.0
 
-    for i, val in enumerate(proj):
+    for _i, val in enumerate(proj):
         if not in_band and val > threshold:
-            entry_sq.append(val ** 2)
+            entry_sq.append(val**2)
             in_band = True
         elif in_band and val <= threshold:
-            exit_sq.append(prev_val ** 2)
+            exit_sq.append(prev_val**2)
             in_band = False
         prev_val = val
 
     # Close any open band at the image edge.
     if in_band and prev_val > threshold:
-        exit_sq.append(prev_val ** 2)
+        exit_sq.append(prev_val**2)
 
     if not entry_sq or not exit_sq:
         return 0.0
@@ -117,25 +118,25 @@ def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
     # Coarse pass: every 5° from -90° to +90° inclusive.
     best_angle = 0.0
     best_var = _var(0.0)
-    for a in range(-90, 91, 5):
-        if a == 0:
+    for coarse_deg in range(-90, 91, 5):
+        if coarse_deg == 0:
             continue
-        v = _var(float(a))
+        v = _var(float(coarse_deg))
         if v > best_var:
             best_var = v
-            best_angle = float(a)
+            best_angle = float(coarse_deg)
 
     # Fine pass: ±4° around the coarse winner (always, even when winner is 0°
     # so that small CW tilts are detected even when no coarse angle beats 0°).
     for da in range(-4, 5):
         if da == 0:
             continue
-        a = best_angle + da
-        if -90.0 <= a <= 90.0:
-            v = _var(a)
+        fine_angle = best_angle + float(da)
+        if -90.0 <= fine_angle <= 90.0:
+            v = _var(fine_angle)
             if v > best_var:
                 best_var = v
-                best_angle = a
+                best_angle = fine_angle
 
     return best_angle
 

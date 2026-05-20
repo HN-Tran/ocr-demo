@@ -16,6 +16,7 @@ from PIL import Image, ImageOps
 from app.schemas import SCHEMA_REGISTRY
 from app.services.deskew import deskew_image
 from app.services.inference import InferenceError
+from app.services.inference.protocol import VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
 from app.services.structured import parse_structured_output
 
@@ -232,7 +233,7 @@ class OCRPipeline:
         if default_token_limit > MAX_TOKEN_LIMIT:
             raise ValueError(f"default_token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
         self.vision_registry = vision_registry
-        self._run_client = None
+        self._run_client: VisionLlmClient | None = None
         self.default_model = default_model
         self.default_token_limit = default_token_limit
         self.max_image_dim = max_image_dim
@@ -279,13 +280,9 @@ class OCRPipeline:
 
             detected_angle = 0.0
             if self.deskew_enabled:
-                image, detected_angle = deskew_image(
-                    image, min_angle_deg=self.deskew_min_angle_deg
-                )
+                image, detected_angle = deskew_image(image, min_angle_deg=self.deskew_min_angle_deg)
                 if detected_angle != 0.0:
-                    warnings.append(
-                        f"Deskew: {detected_angle:.1f}° CCW Korrektur angewendet"
-                    )
+                    warnings.append(f"Deskew: {detected_angle:.1f}° CCW Korrektur angewendet")
 
             # Schritt 1: bitonale/Grauwert-Eingaben hochskalieren, BEVOR wir
             # an die max_image_dim-Grenze kommen — sonst geht der Vorteil

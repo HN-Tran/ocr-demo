@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.services.analyze_operation_store import AnalyzeOperationStore
 
 
-def test_store_persists_operations_to_disk(tmp_path) -> None:
+def test_store_persists_operations_to_disk(tmp_path: Path) -> None:
     created_at = datetime(2026, 3, 9, 12, 0, tzinfo=timezone.utc)
     completed_at = datetime(2026, 3, 9, 12, 1, tzinfo=timezone.utc)
 

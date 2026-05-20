@@ -32,9 +32,7 @@ def resolve_layout_device(requested: str | None) -> str:
         return "cuda"
     if raw.startswith("cuda:"):
         if not torch.cuda.is_available():
-            logger.warning(
-                "Layout device %r requested but CUDA is unavailable; using CPU", raw
-            )
+            logger.warning("Layout device %r requested but CUDA is unavailable; using CPU", raw)
             return "cpu"
         return raw
     logger.warning("Unknown layout device %r; falling back to auto", requested)
@@ -365,11 +363,7 @@ class HFLayoutDetector:
             "auto",
             "",
         }:
-            legacy = (
-                f"cuda:{self.cuda_visible_devices}"
-                if torch.cuda.is_available()
-                else "cpu"
-            )
+            legacy = f"cuda:{self.cuda_visible_devices}" if torch.cuda.is_available() else "cpu"
             self._device = legacy
         else:
             self._device = resolve_layout_device(self.layout_device)

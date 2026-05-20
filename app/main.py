@@ -13,15 +13,15 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.routes import compat_router, router, warm_example
 from app.config import Settings, get_settings
+from app.i18n import SUPPORTED_LOCALES, load_messages, resolve_locale
+from app.i18n.compare import available_engines as localized_compare_engines
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 from app.services.benchmark import BenchmarkJobStore
-from app.i18n import SUPPORTED_LOCALES, load_messages, resolve_locale
-from app.i18n.compare import available_engines as localized_compare_engines
 from app.services.document_pipeline import DocumentPipeline
+from app.services.inference import create_vision_registry
 from app.services.mlflow_sink import make_sink as make_mlflow_sink
 from app.services.ocr_pipeline import OCRPipeline
-from app.services.inference import create_vision_registry
 from app.services.warmed_example_store import WarmedExampleStore
 from app.services.word_detector import WordDetector, create_word_detector
 
@@ -205,8 +205,12 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                         cookie=request.cookies.get("app_locale"),
                     )
                 ),
-                "azure_preset_label": f"{settings.azure_preset_label} (Plain)" if settings.azure_preset_label else "",
-                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
+                "azure_preset_label": f"{settings.azure_preset_label} (Plain)"
+                if settings.azure_preset_label
+                else "",
+                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)"
+                if settings.azure_preset_layout_endpoint and settings.azure_preset_label
+                else "",
                 "static_version": version,
                 "app_base_path": app_base_path,
             },
@@ -241,9 +245,13 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 "default_expert_compare_include_detector_only": (
                     settings.ocr_expert_compare_include_detector_only
                 ),
-                "azure_preset_label": f"{settings.azure_preset_label} (Plain)" if settings.azure_preset_label else "",
+                "azure_preset_label": f"{settings.azure_preset_label} (Plain)"
+                if settings.azure_preset_label
+                else "",
                 "azure_preset_endpoint": settings.azure_preset_endpoint,
-                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
+                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)"
+                if settings.azure_preset_layout_endpoint and settings.azure_preset_label
+                else "",
                 "azure_preset_layout_endpoint": settings.azure_preset_layout_endpoint,
                 "compare_engines": localized_compare_engines(locale),
                 "examples": [

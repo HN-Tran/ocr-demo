@@ -11,8 +11,8 @@ from app.services.document_pipeline import (
     _sort_reading_order,
     _strip_table_markup,
 )
-from app.services.ocr_pipeline import OCRPipeline, OCRResult
 from app.services.inference.registry import VisionClientRegistry
+from app.services.ocr_pipeline import OCRPipeline, OCRResult
 
 
 def _png_bytes() -> bytes:

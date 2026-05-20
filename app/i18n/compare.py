@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.i18n import load_messages, normalize_locale, t
+from app.i18n import normalize_locale, t
 from app.services.compare_engines import available_engines as _available_engines
 
 _ENGINE_KEYS = {

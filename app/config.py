@@ -1,10 +1,9 @@
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.i18n import normalize_locale
-from pathlib import Path
-from typing import Any
 
 
 def _env_int(key: str, default: int) -> int:
@@ -69,9 +68,7 @@ def _parse_inference_extra_providers(raw: str) -> dict[str, "InferenceProviderCo
         if isinstance(vision_raw, str):
             vision_models = _parse_csv_tuple(vision_raw)
         elif isinstance(vision_raw, list):
-            vision_models = tuple(
-                str(item).strip() for item in vision_raw if str(item).strip()
-            )
+            vision_models = tuple(str(item).strip() for item in vision_raw if str(item).strip())
         else:
             vision_models = ()
         vision_probe_raw = entry.get("vision_probe")
@@ -167,9 +164,10 @@ def get_settings() -> Settings:
     if not inference_base_url:
         inference_base_url = "http://localhost:11434"
     if inference_provider == "openai_compatible" and inference_base_url == "http://localhost:11434":
-        if not os.getenv("INFERENCE_BASE_URL", "").strip() and not os.getenv(
-            "OLLAMA_BASE_URL", ""
-        ).strip():
+        if (
+            not os.getenv("INFERENCE_BASE_URL", "").strip()
+            and not os.getenv("OLLAMA_BASE_URL", "").strip()
+        ):
             inference_base_url = "http://localhost:8000/v1"
 
     inference_model = (
@@ -200,9 +198,7 @@ def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "docread"),
         app_base_path=os.getenv("APP_BASE_PATH", ""),
-        analyze_store_dir=str(
-            Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/docread-analyze-results"))
-        ),
+        analyze_store_dir=str(Path(os.getenv("ANALYZE_STORE_DIR", "/tmp/docread-analyze-results"))),
         inference_provider=inference_provider,
         inference_base_url=inference_base_url,
         inference_model=inference_model,

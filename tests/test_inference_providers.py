@@ -8,9 +8,9 @@ import pytest
 from app.config import Settings
 from app.services.inference.factory import create_vision_client, create_vision_registry
 from app.services.inference.model_ref import parse_model_ref
-from app.services.inference.registry import _client_for_provider
 from app.services.inference.ollama import OllamaClient, OllamaError
 from app.services.inference.openai_compatible import OpenAICompatibleClient, OpenAICompatibleError
+from app.services.inference.registry import _client_for_provider
 
 
 def _base_settings(**overrides: object) -> Settings:
@@ -64,7 +64,9 @@ def _base_settings(**overrides: object) -> Settings:
     return Settings(**defaults)  # type: ignore[arg-type]
 
 
-def _mock_http_client(*, get_json: object | None = None, post_json: object | None = None) -> MagicMock:
+def _mock_http_client(
+    *, get_json: object | None = None, post_json: object | None = None
+) -> MagicMock:
     instance = MagicMock()
     instance.__aenter__ = AsyncMock(return_value=instance)
     instance.__aexit__ = AsyncMock(return_value=None)

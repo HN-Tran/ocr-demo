@@ -8,8 +8,9 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
+from starlette.routing import Route
 
-from app.api.routes import health, ocr, router, schemas
+from app.api.routes import ocr, router, schemas
 from app.services.backend_router import OCRBackendRouter
 
 
@@ -227,9 +228,9 @@ def _pipeline() -> OCRBackendRouter:
 
 def test_health() -> None:
     from starlette.testclient import TestClient
+    from test_main import _settings
 
     from app.main import _create_ocr_app
-    from test_main import _settings
 
     client = TestClient(_create_ocr_app(settings=_settings()))
     response = client.get("/api/health")
@@ -724,7 +725,7 @@ def test_ocr_forwards_expert_enable_layout() -> None:
 
 
 def test_api_v1_alias_routes_exist() -> None:
-    route_paths = {route.path for route in router.routes}
+    route_paths = {route.path for route in router.routes if isinstance(route, Route)}
     assert "/api/health/" in route_paths
     assert "/api/models/" in route_paths
     assert "/api/schemas/" in route_paths

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from starlette.testclient import TestClient
+from test_main import _settings
 
 from app.main import _create_ocr_app
-from test_main import _settings
 
 
 def test_inference_providers_endpoint() -> None:

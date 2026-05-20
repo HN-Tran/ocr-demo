@@ -8,8 +8,8 @@ from pathlib import Path
 from statistics import mean
 
 from app.config import get_settings
-from app.services.ocr_pipeline import OCRPipeline
 from app.services.inference import create_vision_registry
+from app.services.ocr_pipeline import OCRPipeline
 from eval.metrics import cer, field_accuracy, wer
 
 

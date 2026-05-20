@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from io import BytesIO
-from typing import cast
 
 import pytest
 from PIL import Image
 
+from app.services.inference.registry import VisionClientRegistry
 from app.services.ocr_pipeline import (
     PLAIN_TASK_DESCRIBE_IMAGE,
     PLAIN_TASK_PROMPTS,
     OCRPipeline,
 )
-from app.services.inference.registry import VisionClientRegistry
 
 
 def _png_bytes() -> bytes:
